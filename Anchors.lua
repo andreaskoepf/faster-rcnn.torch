@@ -42,6 +42,11 @@ function Anchors:__init(proposal_net, scales)
   end
 end
 
+function Anchors:get(layer, aspect, y, x)
+  local w, h = self.w, self.h
+  return Rect.new(w[{layer, aspect, x, 1}], h[{layer, aspect, y, 1}], w[{layer, aspect, x, 2}], h[{layer, aspect, y, 2}])
+end
+
 function Anchors:findRangesXY(rect, clip_rect)
   local function lower_bound(t, value)
     local low, high = 1, t:nElement()

@@ -383,10 +383,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
   local training_data = load_obj(training_data_filename)
   local ground_truth = training_data.ground_truth
   local image_file_names = training_data.image_file_names
-  
-  local anchors = Anchors.new(pnet, training_data.scales)
-  local localizer = Localizer.new(pnet.outnode.children[5])
-  
+
   local stored = load_obj(network_filename)
   
   local class_count = class_count
@@ -395,6 +392,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
   pnet:cuda()
   cnet:cuda()
   
+  local anchors = Anchors.new(pnet, training_data.scales)
   local localizer = Localizer.new(pnet.outnode.children[5])
   
   -- restore weights
@@ -433,64 +431,80 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
     -- analyse network output for non-background classification
     local matches = {}
 
-    for i,a in ipairs(anchors) do 
-      local l = a.layer
-      local idx = a.index
-      
-      local v = outputs[l][idx]
-      
-      -- classification
-      local cls_out = v[{{1,2}}] 
-      local reg_out = v[{{3,6}}]
-      
-      local r = Anchors.anchorToInput(a, reg_out)
-      
-      local c = lsm:forward(cls_out)
-      if math.exp(c[1]) > 0.9 then
-        table.insert(matches, { p=c[1], a=a,  r=r, l=l })
-      end  
-      
+    local aspect_ratios = 3
+    for i=1,4 do
+      local layer = outputs[i]
+      local layer_size = layer:size()
+      for y=1,layer_size[2] do
+        for x=1,layer_size[3] do
+          local c = layer[{{}, y, x}]
+          for a=1,aspect_ratios do
+
+            local ofs = (a-1) * 6
+            local cls_out = c[{{ofs + 1, ofs + 2}}] 
+            local reg_out = c[{{ofs + 3, ofs + 6}}]
+            
+            -- regression
+            local a = anchors:get(i,a,y,x)
+            local r = Anchors.anchorToInput(a, reg_out)
+            
+            -- classification
+            local c = lsm:forward(cls_out)
+            if math.exp(c[1]) > 0.9 then
+              table.insert(matches, { p=c[1], a=a,  r=r, l=i })
+            end
+            
+          end
+        end
+      end      
     end
     
-    -- NON-MAXIMUM SUPPRESSION
-    local bb = torch.Tensor(#matches, 4)
-    for i=1,#matches do
-      bb[i] = matches[i].r:totensor()
-    end
-    
-    local iou_threshold = 0.5
-    local pick = nms(bb, iou_threshold, 'area')
     local winners = {}
-    pick:apply(function (x) table.insert(winners, matches[x]) end )
-
-    -- REGION CLASSIFICATION 
-
-    cnet:evaluate()
     
-    -- create cnet input batch
-    local cinput = torch.CudaTensor(#winners, 7 * 7 * 300)
-    for i,v in ipairs(winners) do
-      -- pass through adaptive max pooling operation
-      local pi, idx = extract_roi_pooling_input(v.r, localizer, outputs[5])
-      local po = amp:forward(pi):view(7 * 7 * 300)
-      cinput[i] = po:clone()
-    end
+    print(#matches)
+    if #matches > 0 then
     
-    -- send extracted roi-data through classification network
-    local coutputs = cnet:forward(cinput)
-    
-    -- compute classification and regression error and run backward pass
-    local bbox_out = coutputs[1]
-    local cls_out = coutputs[2]
-    
-    for i=1,#winners do
-      winners[i].r2 = Anchors.anchorToInput(winners[i].a, bbox_out[i])
+      -- NON-MAXIMUM SUPPRESSION
+      local bb = torch.Tensor(#matches, 4)
+      for i=1,#matches do
+        bb[i] = matches[i].r:totensor()
+      end
       
-      local cprob = cls_out[i]
-      local p,c = torch.sort(cprob, 1, true) -- get probabilities and class indicies
+      local iou_threshold = 0.5
+      local pick = nms(bb, iou_threshold, 'area')
       
-      winners[i].class = c[1]
-      winners[i].confidence = p[1]
+      pick:apply(function (x) table.insert(winners, matches[x]) end )
+  
+      -- REGION CLASSIFICATION 
+  
+      cnet:evaluate()
+      
+      -- create cnet input batch
+      local cinput = torch.CudaTensor(#winners, 7 * 7 * 300)
+      for i,v in ipairs(winners) do
+        -- pass through adaptive max pooling operation
+        local pi, idx = extract_roi_pooling_input(v.r, localizer, outputs[5])
+        local po = amp:forward(pi):view(7 * 7 * 300)
+        cinput[i] = po:clone()
+      end
+      
+      -- send extracted roi-data through classification network
+      local coutputs = cnet:forward(cinput)
+      
+      -- compute classification and regression error and run backward pass
+      local bbox_out = coutputs[1]
+      local cls_out = coutputs[2]
+      
+      for i=1,#winners do
+        winners[i].r2 = Anchors.anchorToInput(winners[i].a, bbox_out[i])
+        
+        local cprob = cls_out[i]
+        local p,c = torch.sort(cprob, 1, true) -- get probabilities and class indicies
+        
+        winners[i].class = c[1]
+        winners[i].confidence = p[1]
+      end
+
     end
 
     -- load image back to rgb-space before drawing rectangles
@@ -498,10 +512,10 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
     
     for i,m in ipairs(winners) do
       local color
-      if m.class ~= 17 and math.exp(m.confidence) > 0.25 then
+      --if m.class ~= 17 and math.exp(m.confidence) > 0.25 then
         draw_rectangle(img, m.r, blue)
-        draw_rectangle(img, m.r2, color)
-      end
+        draw_rectangle(img, m.r2, green)
+      --end
     end
     
     image.saveJPG(string.format('dummy%d.jpg', n), img)
@@ -574,5 +588,5 @@ function graph_training(training_data_filename, network_filename)
 end
 
 --precompute_positive_list('training_data.t7', 0.6, 0.3)
-graph_training('training_data.t7') 
---graph_evaluate('training_data2.t7', 'full2_003000.t7', true)
+graph_training('training_data.t7', 'full2_001000.t7') 
+--graph_evaluate('training_data.t7', 'full2_001000.t7', true)
