@@ -34,14 +34,15 @@ function nms(boxes, overlap, scores)
     
   local area = torch.cmul(x2 - x1 + 1, y2 - y1 + 1)
   
-  local v, I
-  if scores == 'area' then
-    v, I = area:sort(1)
-  elseif scores then
-    v, I = scores:sort()
-  else -- use max_y
-    v, I = y2:sort(1)
+  if type(scores) == 'number' then
+    scores = boxes[{{}, scores}]
+  elseif scores == 'area' then
+    scores = area
+  else
+    scores = y2   -- use max_y
   end
+  
+  local v, I = scores:sort(1)
 
   pick:resize(area:size()):zero()
   local count = 1

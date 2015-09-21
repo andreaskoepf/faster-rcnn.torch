@@ -87,6 +87,11 @@ function Rect:contains(otherRect)
   return self:containsPt(otherRect.minX, otherRect.minY) and self:containsPt(otherRect.maxX, otherRect.maxY)
 end
 
+function Rect:overlaps(other)
+ return self.minX < other.maxX and self.maxX > other.minX 
+  and self.minY < other.maxY and self.maxY > other.minY
+end
+
 function Rect:normalize()
   local l, t, r, b
   if self.minX <= self.maxX then
