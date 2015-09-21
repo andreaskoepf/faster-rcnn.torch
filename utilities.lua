@@ -141,3 +141,8 @@ end
 function remove_quotes(s)
   return s:gsub('^"(.*)"$', "%1")
 end
+
+function normalize_debug(t)
+  local lb, ub = t:min(), t:max()
+  return (t -lb):div(ub-lb+1e-10)
+end

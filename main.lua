@@ -48,9 +48,6 @@ if opt.seed ~= 0 then
   cutorch.manualSeed(opt.seed)
 end
 
--- precompute positive examples
-
-
 function read_csv_file(fn)
   -- format of RoI file:
   -- filename, left, top, right, bottom, model_class_name, model_class_index, material_name, material_index
@@ -221,9 +218,10 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
       for i,x in ipairs(p) do
         local anchor = x[1]
         local roi = x[2]
+        local l = x[1].layer
         
-        local out = outputs[x[1].layer]
-        local delta_out = delta_outputs[x[1].layer]
+        local out = outputs[l]
+        local delta_out = delta_outputs[l]
          
         local idx = x[1].index
         local v = out[idx]
@@ -250,8 +248,9 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
       
       -- process negative
       for i,x in ipairs(n) do
-        local out = outputs[x.layer]
-        local delta_out = delta_outputs[x.layer]
+        local l = x.layer
+        local out = outputs[l]
+        local delta_out = delta_outputs[l]
         local idx = x.index
         local v = out[idx]
         local d = delta_out[idx]
@@ -419,7 +418,6 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
   for n,fn in ipairs(test_images) do
     
     -- load image
-    print(fn)
     local input = load_image_auto_size(fn, training_data.target_smaller_side, training_data.max_pixel_size, 'yuv')
     local input_size = input:size()
     input = normalize_image(input):cuda()
@@ -512,10 +510,10 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
     
     for i,m in ipairs(winners) do
       local color
-      --if m.class ~= 17 and math.exp(m.confidence) > 0.25 then
+      if m.class ~= 17 and math.exp(m.confidence) > 0.25 then
         draw_rectangle(img, m.r, blue)
-        draw_rectangle(img, m.r2, green)
-      --end
+        --draw_rectangle(img, m.r2, green)
+      end
     end
     
     image.saveJPG(string.format('dummy%d.jpg', n), img)
@@ -588,5 +586,5 @@ function graph_training(training_data_filename, network_filename)
 end
 
 --precompute_positive_list('training_data.t7', 0.6, 0.3)
-graph_training('training_data.t7', 'full2_001000.t7') 
---graph_evaluate('training_data.t7', 'full2_001000.t7', true)
+graph_training('training_data.t7') 
+--graph_evaluate('training_data.t7', 'full2_022000.t7', true)

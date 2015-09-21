@@ -43,7 +43,7 @@ function Localizer:inputToFeatureRect(rect, layer_index)
   for i=1,layer_index do
     local l = self.layers[i]
     if l.dW < l.kW then
-      rect = rect:inflate((l.kW-l.dW)/2, (l.kH-l.dH)/2)
+      rect = rect:inflate((l.kW-l.dW), (l.kH-l.dH))
     end
 
     rect = rect:offset(l.padW, l.padH)

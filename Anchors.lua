@@ -118,13 +118,11 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
         for x=1,r.xs:size()[1] do
           -- create rect, add layer & aspect info
           local anchor_rect = Rect.new(r.xs[{x, 1}], minY, r.xs[{x, 2}], maxY)
-          --print(anchor_rect)
           anchor_rect.layer = r.layer
           anchor_rect.aspect = r.aspect 
-          anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.ly + x - 1 }
+          anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
           
           local v = Rect.IoU(roi.rect, anchor_rect)
-          --print(v)
           if v > pos_threshold then
             table.insert(matches, { anchor_rect, roi })
             best = nil
