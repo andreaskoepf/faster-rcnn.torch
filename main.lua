@@ -4,13 +4,12 @@ require 'optim'
 require 'image'
 require 'nngraph'
 require 'cunn'
-require 'rect'
 require 'SmoothL1Criterion'
 require 'nms'
 
 require 'utilities'
 require 'model'
-require 'anchors'
+require 'Anchors'
 
 -- parameters
 
@@ -42,12 +41,15 @@ print(opt)
 
 -- system configuration
 torch.setdefaulttensortype('torch.FloatTensor')
-cutorch.setDevice(opt.gpuid + 1)
+cutorch.setDevice(opt.gpuid + 1)  -- nvidia tools start counting at 0
 torch.setnumthreads(opt.threads)
 if opt.seed ~= 0 then
   torch.manualSeed(opt.seed)
   cutorch.manualSeed(opt.seed)
 end
+
+-- precompute positive examples
+
 
 function read_csv_file(fn)
   -- format of RoI file:
@@ -86,6 +88,11 @@ end
 
 local normalization = nn.SpatialContrastiveNormalization(1, image.gaussian1D(11))
 
+function normalize_image(img)
+  img[1] = normalization:forward(img[{{1}}])
+  return img
+end
+
 function load_image(fn, w, h, normalize)
   local img = image.load(path.join(base_path, fn), 3, 'float')
   local originalSize = img:size()
@@ -97,18 +104,48 @@ function load_image(fn, w, h, normalize)
   return img, scaleX, scaleY
 end
 
-function compute_feature_layer_rect(input_rect, input_size, feature_layer_size)
+function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_space)
+  local img = image.load(path.join(base_path, fn), 3, 'float')
+  local dim = img:size()
+  
+  local w, h
+  if dim[2] < dim[3] then
+    -- height is smaller than width, set h to target_size
+    w = math.min(dim[3] * target_smaller_side/dim[2], max_pixel_size)
+    h = dim[2] * w/dim[3]
+  else
+    -- width is smaller than height, set w to target_size
+    h = math.min(dim[2] * target_smaller_side/dim[1], max_pixel_size)
+    w = dim[3] * h/dim[2]
+  end
+  
+  img = image.scale(img, w, h)
+  
+  if color_space == 'yuv' then
+    img = image.rgb2yuv(img)
+  elseif color_space == 'lab' then
+    img = image.rgb2lab(img)
+  elseif color_space == 'hsv' then
+    img = image.rgb2hsv(img)
+  end
+
+  return img, dim
+end
+
+--[[function compute_feature_layer_rect(input_rect, input_size, feature_layer_size)
   local input_height, input_width = input_size[2], input_size[3]
   local h, w = feature_layer_size[2], feature_layer_size[3]
   local scaleY, scaleX = h / input_height, w / input_width
   return Rect.new(input_rect):scale(scaleX, scaleY):snapToInt():clip(Rect.new(0, 0, w, h))
-end
+end]]
 
-function extract_roi_pooling_input(input_rect, input_size, feature_layer_output)
-  local r = compute_feature_layer_rect(input_rect, input_size, feature_layer_output:size())
+function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
+  local r = localizer:inputToFeatureRect(input_rect)
   -- the use of math.min ensures correct handling of empty rects, 
   -- +1 offset for top, left only is conversion from half-open 0-based interval
-  local idx = { {}, { math.min(r.miny + 1, r.maxy), r.maxy }, { math.min(r.minx + 1, r.maxx), r.maxx } }
+  local s = feature_layer_output:size()
+  r = r:clip(Rect.new(0,0,s[3],s[2]))
+  local idx = { {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
   return feature_layer_output[idx], idx
 end
 
@@ -116,7 +153,9 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
   local ground_truth = training_data.ground_truth 
   local train_file_names =  training_data.train_file_names
   local test_file_names =  training_data.test_file_names
-  local anchors = training_data.anchors
+  
+  local anchors = Anchors.new(pnet, training_data.scales)
+  local localizer = Localizer.new(pnet.outnode.children[5])
   
   local softmax = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
@@ -149,17 +188,15 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
       local fn = train_file_names[torch.random() % #train_file_names + 1]
       local rois = ground_truth[fn].rois
      
+      -- load image
+      --print(fn)
+      local img = load_image_auto_size(fn, training_data.target_smaller_side, training_data.max_pixel_size, 'yuv')
+      local img_size = img:size()
+      img = normalize_image(img)
+      
       -- get positive and negative anchors examples
       local p = ground_truth[fn].positive_anchors
-      if not p then
-        p = find_positive_anchors(rois, anchors, 0.6, 0.3, true)
-        ground_truth[fn].positive_anchors = p
-      end
-      local n = sample_negative_anchors(rois, anchors, 0.3, math.max(16, #p))
-    
-      -- load image
-      local img = load_image(fn, 800, 450, normalize)
-      --print(fn)
+      local n = anchors:sampleNegative(Rect.new(0, 0, img_size[3], img_size[2]), rois, 0.3, math.max(16, #p))
       
       -- convert batch to cuda if we are running on the gpu
       img = img:cuda()
@@ -199,21 +236,20 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
         
         -- box regression
         local reg_out = v[{{3, 6}}]
-        local reg_target = input_to_anchor(anchor, roi.rect):cuda()  -- regression target
-        local reg_proposal = anchor_to_input(anchor, reg_out)
+        local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
+        local reg_proposal = Anchors.anchorToInput(anchor, reg_out)
         reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * 10
         local dr = smoothL1:backward(reg_out, reg_target) * 10
         d[{{3,6}}]:add(dr)
         
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(roi.rect, input_size, outputs[5])
+        local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[5])
         local po = amp:forward(pi):view(7 * 7 * 300)
         table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
       end
       
       -- process negative
       for i,x in ipairs(n) do
-      
         local out = outputs[x.layer]
         local delta_out = delta_outputs[x.layer]
         local idx = x.index
@@ -225,7 +261,7 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
         d[{{1,2}}]:add(dc)
         
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(x, input_size, outputs[5])
+        local pi, idx = extract_roi_pooling_input(x, localizer, outputs[5])
         local po = amp:forward(pi):view(7 * 7 * 300)
         table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
       end
@@ -242,8 +278,7 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
         if x.roi then
           -- positive example
           cctarget[i] = x.roi.model_class_index + 1
-          crtarget[i] = input_to_anchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
-          --crtarget[i] = input_to_anchor(x.anchor, x.roi.rect)     -- base fine tuning on anchor
+          crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
         else
           -- negative example
           cctarget[i] = bgclass
@@ -300,33 +335,29 @@ function create_optimization_target(pnet, cnet, weights, gradient, training_data
 end
 
 function precompute_positive_list(out_fn, positive_threshold, negative_threshold, test_size)
-  local width, height = 800, 450
-  
+  local target_smaller_side = 450
+  local max_pixel_size = 1000
+  local scales = { 48, 96, 192, 384 }
+   
   local roi_file_name = path.join(base_path, 'boxes.csv') 
   local ground_truth = read_csv_file(roi_file_name)
   local image_file_names = keys(ground_truth)
   
   -- determine layer sizes
   local pnet = create_proposal_net()
-  local out = pnet:forward(torch.zeros(3, height, width))
-  
-  local layer_sizes = {}
-  for i,l in ipairs(out) do
-    if (i > 4) then break end
-    table.insert(layer_sizes, l:size())
-  end
-  
-  local anchors = generate_anchors(layer_sizes, width, height, true)
-  
+  local anchors = Anchors.new(pnet, scales)
+    
   for n,x in pairs(ground_truth) do
-    local img, scaleX, scaleY = load_image(n, width, height, false)
+    local img, original_size = load_image_auto_size(n, target_smaller_side, max_pixel_size, 'rgb')
+    x.scaleX = img:size()[3] / original_size[3]
+    x.scaleY = img:size()[2] / original_size[2]
     local rois = x.rois
     for i=1,#rois do
       rois[i].original_rect = rois[i].rect
-      rois[i].rect = rois[i].rect:scale(scaleX, scaleY)
+      rois[i].rect = rois[i].rect:scale(x.scaleX, x.scaleY)
     end
-    x.positive_anchors = find_positive_anchors(rois, anchors, positive_threshold, negative_threshold, true)
-    print(string.format('%s: %d', n, #x.positive_anchors))
+    x.positive_anchors = anchors:findPositive(rois, Rect.new(0, 0, img:size()[3], img:size()[2]), positive_threshold, negative_threshold, true)
+    print(string.format('%s: %d (rois: %d)', n, #x.positive_anchors, #x.rois))
   end
   
   test_size = test_size or 0.2 -- 80:20 split
@@ -338,8 +369,9 @@ function precompute_positive_list(out_fn, positive_threshold, negative_threshold
   
   local training_data = 
   {
-    input_size = { width = width, height = height },
-    anchors = anchors,
+    target_smaller_side = target_smaller_side, 
+    max_pixel_size = max_pixel_size,
+    scales = scales,
     train_file_names = image_file_names,
     test_file_name = test_set,
     ground_truth = ground_truth
@@ -351,8 +383,9 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
   local training_data = load_obj(training_data_filename)
   local ground_truth = training_data.ground_truth
   local image_file_names = training_data.image_file_names
-  local anchors = training_data.anchors
-  local training_stats = {}
+  
+  local anchors = Anchors.new(pnet, training_data.scales)
+  local localizer = Localizer.new(pnet.outnode.children[5])
   
   local stored = load_obj(network_filename)
   
@@ -361,6 +394,8 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
   local cnet = create_classifaction_net(kw, kh, 300, class_count)
   pnet:cuda()
   cnet:cuda()
+  
+  local localizer = Localizer.new(pnet.outnode.children[5])
   
   -- restore weights
   local weights, gradient = combine_and_flatten_parameters(pnet, cnet)
@@ -384,12 +419,12 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
   
   local amp = nn.SpatialAdaptiveMaxPooling(7, 7):cuda()
   for n,fn in ipairs(test_images) do
-    -- pick a test image randomly and load it
-    print(fn)
-
+    
     -- load image
-    local input = load_image(fn, 800, 450, normalize):cuda()
+    print(fn)
+    local input = load_image_auto_size(fn, training_data.target_smaller_side, training_data.max_pixel_size, 'yuv')
     local input_size = input:size()
+    input = normalize_image(input):cuda()
 
     -- pass image through network
     pnet:evaluate()
@@ -408,7 +443,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
       local cls_out = v[{{1,2}}] 
       local reg_out = v[{{3,6}}]
       
-      local r = anchor_to_input(a, reg_out)
+      local r = Anchors.anchorToInput(a, reg_out)
       
       local c = lsm:forward(cls_out)
       if math.exp(c[1]) > 0.9 then
@@ -436,7 +471,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
     local cinput = torch.CudaTensor(#winners, 7 * 7 * 300)
     for i,v in ipairs(winners) do
       -- pass through adaptive max pooling operation
-      local pi, idx = extract_roi_pooling_input(v.r, input_size, outputs[5])
+      local pi, idx = extract_roi_pooling_input(v.r, localizer, outputs[5])
       local po = amp:forward(pi):view(7 * 7 * 300)
       cinput[i] = po:clone()
     end
@@ -449,7 +484,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
     local cls_out = coutputs[2]
     
     for i=1,#winners do
-      winners[i].r2 = anchor_to_input(winners[i].a, bbox_out[i])
+      winners[i].r2 = Anchors.anchorToInput(winners[i].a, bbox_out[i])
       
       local cprob = cls_out[i]
       local p,c = torch.sort(cprob, 1, true) -- get probabilities and class indicies
@@ -459,8 +494,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize)
     end
 
     -- load image back to rgb-space before drawing rectangles
-    local img = load_image(fn, 800, 450, false)
-    img = image.yuv2rgb(img)
+    local img = load_image_auto_size(fn, training_data.target_smaller_side, training_data.max_pixel_size, 'rgb')
     
     for i,m in ipairs(winners) do
       local color
@@ -539,6 +573,6 @@ function graph_training(training_data_filename, network_filename)
   -- compute positive anchors, add anchors to ground-truth file
 end
 
---precompute_positive_list('training_data2.t7', 0.6, 0.3)
-graph_training('training_data2.t7') 
+--precompute_positive_list('training_data.t7', 0.6, 0.3)
+graph_training('training_data.t7') 
 --graph_evaluate('training_data2.t7', 'full2_003000.t7', true)

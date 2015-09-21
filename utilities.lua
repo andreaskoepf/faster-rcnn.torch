@@ -111,29 +111,29 @@ end
 function draw_rectangle(img, rect, color)
   local sz = img:size()
   
-  local x0 = math.max(1, rect.minx)
-  local x1 = math.min(sz[3], rect.maxx)
+  local x0 = math.max(1, rect.minX)
+  local x1 = math.min(sz[3], rect.maxX)
   local w = math.floor(x1) - math.floor(x0)
   if w >= 0 then
     local v = color:view(3,1):expand(3, w + 1)
-    if rect.miny > 0 and rect.miny <= sz[2] then
-      img[{{}, rect.miny, {x0, x1}}] = v
+    if rect.minY > 0 and rect.minY <= sz[2] then
+      img[{{}, rect.minY, {x0, x1}}] = v
     end
-    if rect.maxy > 0 and rect.maxy <= sz[2] then
-      img[{{}, rect.maxy, {x0, x1}}] = v
+    if rect.maxY > 0 and rect.maxY <= sz[2] then
+      img[{{}, rect.maxY, {x0, x1}}] = v
     end
   end
   
-  local y0 = math.max(1, rect.miny)
-  local y1 = math.min(sz[2], rect.maxy)
+  local y0 = math.max(1, rect.minY)
+  local y1 = math.min(sz[2], rect.maxY)
   local h = math.floor(y1) - math.floor(y0)
   if h >= 0 then
     local v = color:view(3,1):expand(3, h + 1)
-    if rect.minx > 0 and rect.minx <= sz[3] then
-      img[{{}, {y0, y1}, rect.minx}] = v 
+    if rect.minX > 0 and rect.minX <= sz[3] then
+      img[{{}, {y0, y1}, rect.minX}] = v 
     end
-    if rect.maxx > 0 and rect.maxx <= sz[3] then
-      img[{{}, {y0, y1}, rect.maxx}] = v
+    if rect.maxX > 0 and rect.maxX <= sz[3] then
+      img[{{}, {y0, y1}, rect.maxX}] = v
     end
   end
 end
