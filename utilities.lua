@@ -38,6 +38,14 @@ function shuffle(array)
   return array
 end
 
+function shallow_copy(t)
+  local t2 = {}
+  for k,v in pairs(t) do
+    t2[k] = v
+  end
+  return t2
+end
+
 function reverse(array)
   local n = #array, t 
   for i=1,n/2 do
