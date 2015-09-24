@@ -28,6 +28,19 @@ function lerp(a, b, t)
   return (1-t) * a + t * b
 end
 
+function shuffle_n(array, count)
+  count = math.max(count, count or #array)
+  local r = #array    -- remaining elements to pick from
+  local j, t
+  for i=1,count do
+    j = math.random(r) + i - 1
+    t = array[i]    -- swap elements at i and j
+    array[i] = array[j]
+    array[j] = t
+    r = r - 1
+  end
+end
+
 function shuffle(array)
   local i, t
   for n=#array,2,-1 do

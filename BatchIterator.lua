@@ -91,11 +91,11 @@ function BatchIterator:__init(pnet, training_data)
   self.anchors = Anchors.new(pnet, cfg.scales)
   
   -- index tensors define evaluation order
-  self.training = { order = torch.IntTensor(), list = training_data.train_file_names }
-  self.test = { order = torch.IntTensor(), list = training_data.test_file_names }
-  self.background = { order = torch.IntTensor(), list = training_data.background_file_names }
+  self.training = { order = torch.IntTensor(), list = training_data.training_set }
+  self.validation = { order = torch.IntTensor(), list = training_data.validation_set }
+  self.background = { order = torch.IntTensor(), list = training_data.background_file_names or {} }
   
-  randomize_order(self.training, self.test, self.background)
+  randomize_order(self.training, self.validation, self.background)
 end
   
 function BatchIterator:processImage(img, rois)
@@ -170,20 +170,29 @@ function BatchIterator:nextTraining(count)
     -- find positive examples
     local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
     local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
-    
+    count = count - #positive
     -- random negative examples
-    local negative = {} --self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(16, #positive))
-    
+    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, 16)
+    count = count - #negative
+     
     if cfg.nearby_aversion then
+      local nearby_negative = {}
       -- add all nearby negative anchors
       for i,p in ipairs(positive) do
         local cx, cy = p[1]:center()
         local nearbyAnchors = self.anchors:findNearby(cx, cy)
         for i,a in ipairs(nearbyAnchors) do
           if Rect.IoU(p[1], a) < cfg.negative_threshold then
-            table.insert(negative, { a })
+            table.insert(nearby_negative, { a })
           end
         end
+      end
+      
+      local c = math.min(#positive, count)
+      shuffle_n(nearby_negative, c)
+      for i=1,c do
+        table.insert(negative, nearby_negative[i])
+        count = count - 1
       end
     end
     
@@ -207,13 +216,12 @@ function BatchIterator:nextTraining(count)
     
     table.insert(batch, { img = img, positive = positive, negative = negative })
     --print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
-    count = count - #positive - #negative
   end
   
   return batch
 end
 
 
-function BatchIterator:nextTesting(count)
+function BatchIterator:nextValidation(count)
   -- TODO
 end

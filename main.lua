@@ -15,10 +15,26 @@ require 'Objective'
 
 -- parameters
 
-local base_path = '/home/team/datasets/brickset_all/'
-local testset_path = '/home/team/datasets/realbricks/'
-local class_count = 16 + 1
-local kw, kh = 7,7
+local base_path = '/home/koepf/datasets/brickset_all/'
+local testset_path = '/home/koepf/datasets/realbricks/'
+
+ local duplo_cfg = {
+  class_count = 16,  -- excluding background class
+  target_smaller_side = 450,
+  --scales = { 48, 96, 192, 384 },
+  scales = { 32, 64, 128, 256 },
+  max_pixel_size = 1000,
+  normalization = { method = 'contrastive', width = 7 },
+  color_space = 'yuv',
+  roi_pooling = { kw = 6, kh = 6 },
+  examples_base_path = '/home/koepf/datasets/brickset_all/',
+  background_base_path = '/home/koepf/datasets/background/',
+  batch_size = 256,
+  positive_threshold = 0.5, 
+  negative_threshold = 0.25,
+  best_match = true,
+  nearby_aversion = true
+}
 
 -- command line options
 cmd = torch.CmdLine()
@@ -50,43 +66,6 @@ if opt.seed ~= 0 then
   cutorch.manualSeed(opt.seed)
 end
 
-function read_csv_file(fn)
-  -- format of RoI file:
-  -- filename, left, top, right, bottom, model_class_name, model_class_index, material_name, material_index
-  -- "img8494058054b911e5a5ab086266c6c775.png", 0, 573, 59, 701, "DuploBrick_2x2", 2, "DuploBrightGreen", 11
-
-  local f = io.open(fn, 'r')
-
-  local filemap = {}
-  
-  for l in f:lines() do
-    local v = l:split(',') -- get values of single row (we have a trivial csv file without ',' in string values)
-    
-    local image_file_name = remove_quotes(v[1])  -- extract image file name, remove quotes
-    local roi_entry = {
-      rect = Rect.new(tonumber(v[2]), tonumber(v[3]), tonumber(v[4]), tonumber(v[5])),
-      model_class_name = remove_quotes(v[6]), 
-      model_class_index = tonumber(v[7]),
-      material_name = remove_quotes(v[8]),
-      material_index = tonumber(v[9])
-    }
-    
-    local file_entry = filemap[image_file_name]
-    if file_entry == nil then
-      file_entry = { image_file_name = image_file_name, rois = {} }
-      filemap[image_file_name] = file_entry 
-    end
-    
-    table.insert(file_entry.rois, roi_entry)
-  end
- 
-  f:close()
-  
-  return filemap
-end
-
-
-
 function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_space)
   local img = image.load(path.join(base_path, fn), 3, 'float')
   local dim = img:size()
@@ -115,66 +94,19 @@ function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_spa
   return img, dim
 end
 
-
-function precompute_positive_list(out_fn, positive_threshold, negative_threshold, test_size)
-  local target_smaller_side = 450
-  local max_pixel_size = 1000
-  local scales = { 48, 96, 192, 384 }
-   
-  local roi_file_name = path.join(base_path, 'boxes.csv') 
-  local ground_truth = read_csv_file(roi_file_name)
-  local image_file_names = keys(ground_truth)
-  
-  -- determine layer sizes
-  local pnet = create_proposal_net()
-  local anchors = Anchors.new(pnet, scales)
-    
-  for n,x in pairs(ground_truth) do
-    local img, original_size = load_image_auto_size(n, target_smaller_side, max_pixel_size, 'rgb')
-    x.scaleX = img:size()[3] / original_size[3]
-    x.scaleY = img:size()[2] / original_size[2]
-    local rois = x.rois
-    for i=1,#rois do
-      rois[i].original_rect = rois[i].rect
-      rois[i].rect = rois[i].rect:scale(x.scaleX, x.scaleY)
-    end
-    x.positive_anchors = anchors:findPositive(rois, Rect.new(0, 0, img:size()[3], img:size()[2]), positive_threshold, negative_threshold, true)
-    print(string.format('%s: %d (rois: %d)', n, #x.positive_anchors, #x.rois))
-  end
-  
-  test_size = test_size or 0.2 -- 80:20 split
-  if test_size >= 0 and test_size < 1 then
-    test_size = math.ceil(#image_file_names * test_size)
-  end
-  shuffle(image_file_names)
-  local test_set = remove_tail(image_file_names, test_size)
-  
-  local training_data = 
-  {
-    target_smaller_side = target_smaller_side, 
-    max_pixel_size = max_pixel_size,
-    scales = scales,
-    train_file_names = image_file_names,
-    test_file_name = test_set,
-    ground_truth = ground_truth
-  }
-  save_obj(out_fn, training_data)
-end
-
-function graph_evaluate(training_data_filename, network_filename, normalize, bgclass)
+function graph_evaluate(cfg, training_data_filename, network_filename, normalize, bgclass)
+  -- TODO: REWRITE
   local training_data = load_obj(training_data_filename)
   local ground_truth = training_data.ground_truth
-  local image_file_names = training_data.image_file_names
+  local image_file_names = training_data.validation_set
 
   local stored = load_obj(network_filename)
-  
-  local class_count = class_count
   local pnet = create_proposal_net()
-  local cnet = create_classifaction_net(kw, kh, 300, class_count)
+  local cnet = create_classifaction_net(cfg.roi_pooling.kw, cfg.roi_pooling.kh, 300, cfg.class_count + 1)
   pnet:cuda()
   cnet:cuda()
   
-  local anchors = Anchors.new(pnet, training_data.scales)
+  local anchors = Anchors.new(pnet, cfg.scales)
   local localizer = Localizer.new(pnet.outnode.children[5])
   
   -- restore weights
@@ -197,14 +129,19 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
     table.insert(test_images, fn)
   end]]--
   
-  local amp = nn.SpatialAdaptiveMaxPooling(7, 7):cuda()
+  local normalization = nn.SpatialContrastiveNormalization(1, image.gaussian1D(7))
+  local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
+  local amp = nn.SpatialAdaptiveMaxPooling(kw, kh):cuda()
+
   for n,fn in ipairs(test_images) do
     
     -- load image
-    local input = load_image_auto_size(fn, training_data.target_smaller_side, training_data.max_pixel_size, 'yuv')
+    local input = load_image_auto_size(fn, cfg.target_smaller_side, cfg.max_pixel_size, cfg.color_space)
     local input_size = input:size()
     local input_rect = Rect.new(0, 0, input_size[3], input_size[2])
-    input = normalize_image(input):cuda()
+    
+    input[1] = normalization:forward(input[{{1}}])
+    input = input:cuda()
 
     -- pass image through network
     pnet:evaluate()
@@ -232,7 +169,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
             
             -- classification
             local c = lsm:forward(cls_out)
-            if math.exp(c[1]) > 0.95 and r:overlaps(input_rect) then
+            if math.exp(c[1]) > 0.9 and r:overlaps(input_rect) then
               table.insert(matches, { p=c[1], a=a, r=r, l=i })
             end
             
@@ -256,16 +193,18 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
       local candidates = {}
       pick:apply(function (x) table.insert(candidates, matches[x]) end )
   
+      print(string.format('candidates: %d', #candidates))
+      
       -- REGION CLASSIFICATION 
   
       cnet:evaluate()
       
       -- create cnet input batch
-      local cinput = torch.CudaTensor(#candidates, 7 * 7 * 300)
+      local cinput = torch.CudaTensor(#candidates, cfg.roi_pooling.kw * cfg.roi_pooling.kh * 300)
       for i,v in ipairs(candidates) do
         -- pass through adaptive max pooling operation
         local pi, idx = extract_roi_pooling_input(v.r, localizer, outputs[5])
-        cinput[i] = amp:forward(pi):view(7 * 7 * 300)
+        cinput[i] = amp:forward(pi):view(cfg.roi_pooling.kw * cfg.roi_pooling.kh * 300)
       end
       
       -- send extracted roi-data through classification network
@@ -283,7 +222,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
         x.class = c[1]
         x.confidence = p[1]
         
-        if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
+        if x.class ~= bgclass and math.exp(x.confidence) > 0.01 then
           if not yclass[x.class] then
             yclass[x.class] = {}
           end
@@ -309,7 +248,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
     end
 
     -- load image back to rgb-space before drawing rectangles
-    local img = load_image_auto_size(fn, training_data.target_smaller_side, training_data.max_pixel_size, 'rgb')
+    local img = load_image_auto_size(fn, cfg.target_smaller_side, cfg.max_pixel_size, 'rgb')
     
     for i,m in ipairs(winners) do
         --draw_rectangle(img, m.r, blue)
@@ -321,46 +260,37 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
   end
 end
 
-function graph_training(network_filename)
+function graph_training(cfg, snapshot_prefix, training_data_filename, network_filename)
   
-  -- TODO: create function to create training configuration
-  local ground_truth = read_csv_file('/home/team/datasets/brickset_all/boxes.csv')
-  local image_file_names = keys(ground_truth)
+  local training_data = load_obj(training_data_filename)
+  local file_names = keys(training_data.ground_truth)
+  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; casses: %d", 
+      training_data.dataset_name, 
+      #file_names,
+      #training_data.class_names))
   
-  test_size = test_size or 0.2 -- 80:20 split
-  if test_size >= 0 and test_size < 1 then
-    test_size = math.ceil(#image_file_names * test_size)
-  end
-  shuffle(image_file_names)
-  local test_set = remove_tail(image_file_names, test_size)
+
   
-  local background_file_names = list_files('/home/team/datasets/background', nil, true)
-  
+--[[   
   local cfg = {
-    class_count = 16,  -- excluding background class
+    class_count = #training_data.class_names,  -- excluding background class
     target_smaller_side = 450,
-    --scales = { 48, 96, 192, 384 },
-    scales = { 32, 64, 128, 256 },
+    scales = { 48, 96, 192, 384 },
+    --scales = { 32, 64, 128, 256 },
     max_pixel_size = 1000,
-    normalization = { method = 'contrastive', width = 7 },
+    normalization = { method = 'none' },
     color_space = 'yuv',
     roi_pooling = { kw = 6, kh = 6 },
-    examples_base_path = '/home/team/datasets/brickset_all/',
-    background_base_path = '/home/team/datasets/background/',
+    examples_base_path = '/data/imagenet/ILSVRC2015/Data/DET/train',
+    --background_base_path = '',
     batch_size = 256,
     positive_threshold = 0.5, 
     negative_threshold = 0.25,
     best_match = true,
     nearby_aversion = true
-  }
+  }]]
   
-  local training_data = {
-    ground_truth = ground_truth, 
-    train_file_names = image_file_names,
-    test_file_name = test_set,
-    background_file_names = background_file_names,
-    cfg = cfg
-  }
+  training_data.cfg = cfg  -- add cfg
   
   local training_stats = {}
   
@@ -409,7 +339,7 @@ function graph_training(network_filename)
     if i%1000 == 0 then
       -- save snapshot
       -- todo: change weight storage (for pnet and cnet)
-      save_model(string.format('full2_%06d.t7', i), weights, opt, training_stats)
+      save_model(string.format('%s_%06d.t7', i), snapshot_prefix, weights, opt, training_stats)
     end
     
   end
@@ -417,6 +347,7 @@ function graph_training(network_filename)
   -- compute positive anchors, add anchors to ground-truth file
 end
 
---precompute_positive_list('training_data.t7', 0.6, 0.3)
-graph_training() 
---graph_evaluate('training_data.t7', 'full2_026000.t7', true, 17)
+--graph_training('duplo', 'duplo.t7')
+--graph_training('imgnet', 'ILSVRC2015_DET.t7')
+ 
+graph_evaluate(duplo_cfg, 'duplo.t7', 'av_011000.t7', true, 17)

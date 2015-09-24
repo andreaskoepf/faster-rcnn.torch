@@ -135,47 +135,50 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
           table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
         end
         
-         -- fine-tuning STAGE: send extracted roi-data through classification network
+         -- fine-tuning STAGE
+         -- pass extracted roi-data through classification network
         
         -- create cnet input batch
-        local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * 300)
-        local cctarget = torch.CudaTensor(#roi_pool_state)
-        local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
-        
-        for i,x in ipairs(roi_pool_state) do
-          cinput[i] = x.output
-          if x.roi then
-            -- positive example
-            cctarget[i] = x.roi.model_class_index + 1
-            crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
-          else
-            -- negative example
-            cctarget[i] = bgclass
+        if #roi_pool_state > 0 then
+          local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * 300)
+          local cctarget = torch.CudaTensor(#roi_pool_state)
+          local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
+          
+          for i,x in ipairs(roi_pool_state) do
+            cinput[i] = x.output
+            if x.roi then
+              -- positive example
+              cctarget[i] = x.roi.class_index
+              crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
+            else
+              -- negative example
+              cctarget[i] = bgclass
+            end
           end
-        end
-        
-        -- process classification batch 
-        local coutputs = cnet:forward(cinput)
-        
-        -- compute classification and regression error and run backward pass
-        local crout = coutputs[1]
-        --print(crout)
-        
-        crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
-        creg_loss = creg_loss + smoothL1:forward(crout, crtarget) * 10
-        local crdelta = smoothL1:backward(crout, crtarget) * 10
-        
-        local ccout = coutputs[2]  -- log softmax classification
-        local loss = cnll:forward(ccout, cctarget)
-        ccls_loss = ccls_loss + loss 
-        local ccdelta = cnll:backward(ccout, cctarget)
-        
-        local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
-        
-        -- run backward pass over rois
-        for i,x in ipairs(roi_pool_state) do
-          amp.indices = x.indices
-          delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(300, kh, kw)))
+          
+          -- process classification batch 
+          local coutputs = cnet:forward(cinput)
+          
+          -- compute classification and regression error and run backward pass
+          local crout = coutputs[1]
+          --print(crout)
+          
+          crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
+          creg_loss = creg_loss + smoothL1:forward(crout, crtarget) * 10
+          local crdelta = smoothL1:backward(crout, crtarget) * 10
+          
+          local ccout = coutputs[2]  -- log softmax classification
+          local loss = cnll:forward(ccout, cctarget)
+          ccls_loss = ccls_loss + loss 
+          local ccdelta = cnll:backward(ccout, cctarget)
+          
+          local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
+          
+          -- run backward pass over rois
+          for i,x in ipairs(roi_pool_state) do
+            amp.indices = x.indices
+            delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(300, kh, kw)))
+          end
         end
         
         -- backward pass of proposal network
