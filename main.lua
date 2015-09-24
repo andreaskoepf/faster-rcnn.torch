@@ -11,6 +11,7 @@ require 'utilities'
 require 'model'
 require 'Anchors'
 require 'BatchIterator'
+require 'Objective'
 
 -- parameters
 
@@ -84,14 +85,34 @@ function read_csv_file(fn)
   return filemap
 end
 
-function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
-  local r = localizer:inputToFeatureRect(input_rect)
-  -- the use of math.min ensures correct handling of empty rects, 
-  -- +1 offset for top, left only is conversion from half-open 0-based interval
-  local s = feature_layer_output:size()
-  r = r:clip(Rect.new(0, 0, s[3], s[2]))
-  local idx = { {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
-  return feature_layer_output[idx], idx
+
+
+function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_space)
+  local img = image.load(path.join(base_path, fn), 3, 'float')
+  local dim = img:size()
+  
+  local w, h
+  if dim[2] < dim[3] then
+    -- height is smaller than width, set h to target_size
+    w = math.min(dim[3] * target_smaller_side/dim[2], max_pixel_size)
+    h = dim[2] * w/dim[3]
+  else
+    -- width is smaller than height, set w to target_size
+    h = math.min(dim[2] * target_smaller_side/dim[1], max_pixel_size)
+    w = dim[3] * h/dim[2]
+  end
+  
+  img = image.scale(img, w, h)
+  
+  if color_space == 'yuv' then
+    img = image.rgb2yuv(img)
+  elseif color_space == 'lab' then
+    img = image.rgb2lab(img)
+  elseif color_space == 'hsv' then
+    img = image.rgb2hsv(img)
+  end
+
+  return img, dim
 end
 
 
@@ -167,7 +188,7 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
   local colors = { red, green, blue, white }
   local lsm = nn.LogSoftMax():cuda()
   
-  local test_images = list_files(testset_path)
+  local test_images = list_files(testset_path, nil, true)
   
   -- optionally add random images from training set
   --local test_images = {}
@@ -300,20 +321,42 @@ function graph_evaluate(training_data_filename, network_filename, normalize, bgc
   end
 end
 
-function graph_training(training_data_filename, network_filename)
-  local training_data = load_obj(training_data_filename)
+function graph_training(network_filename)
   
   -- TODO: create function to create training configuration
-  training_data.cfg = {
-    class_count = 16,  -- excluding background class
-    target_smaller_side = 450, 
-    max_pixel_size = 1000, 
-    color_space = 'yuv',
-    roi_pooling = { kw = 7, kh = 7 },
-    base_path = '/home/team/datasets/brickset_all/',
-    batch_size = 300
+  local ground_truth = read_csv_file('/home/koepf/datasets/brickset_all/boxes.csv')
+  local image_file_names = keys(ground_truth)
+  
+  test_size = test_size or 0.2 -- 80:20 split
+  if test_size >= 0 and test_size < 1 then
+    test_size = math.ceil(#image_file_names * test_size)
+  end
+  shuffle(image_file_names)
+  local test_set = remove_tail(image_file_names, test_size)
+  
+  local background_file_names = list_files('/home/koepf/datasets/background', nil, true)
+  
+  local training_data = {
+    ground_truth = ground_truth, 
+    train_file_names = image_file_names,
+    test_file_name = test_set,
+    background_file_names = background_file_names,
+    cfg = {
+      class_count = 16,  -- excluding background class
+      target_smaller_side = 450, 
+      scales = { 48, 96, 192, 384 },
+      max_pixel_size = 1000,
+      normalization = { method = 'contrastive', width = 7 },
+      color_space = 'yuv',
+      roi_pooling = { kw = 7, kh = 7 },
+      examples_base_path = '/home/koepf/datasets/brickset_all/',
+      background_base_path = '/home/koepf/datasets/background/', 
+      batch_size = 500,
+      positive_threshold = 0.6, 
+      negative_threshold = 0.3,
+      best_match = true
+    }
   }
-  training_data.background_file_names = {}
     
   local training_stats = {}
   
@@ -338,21 +381,20 @@ function graph_training(training_data_filename, network_filename)
   end
   
   local batchIterator = BatchIterator.new(pnet, training_data)
-  local objective = createObjective(pnet, cnet, weights, gradient, batchIterator)
+  local eval_objective_grad = create_objective(pnet, cnet, weights, gradient, batchIterator)
   
   local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
   --local sgd_state = { learningRate = 0.000025, weightDecay = 1e-7, momentum = 0.9 }
   
   for i=1,50000 do
-  
     if i % 5000 == 0 then
       opt.lr = opt.lr / 2
       rmsprop_state.lr = opt.lr
     end
   
     local timer = torch.Timer()
-    local _, loss = optim.rmsprop(objective, weights, rmsprop_state)
+    local _, loss = optim.rmsprop(eval_objective_grad, weights, rmsprop_state)
     --local _, loss = optim.nag(optimization_target, weights, nag_state)
     --local _, loss = optim.sgd(optimization_target, weights, sgd_state)
     
@@ -373,5 +415,5 @@ function graph_training(training_data_filename, network_filename)
 end
 
 --precompute_positive_list('training_data.t7', 0.6, 0.3)
---graph_training('training_data.t7') 
-graph_evaluate('training_data.t7', 'full2_026000.t7', true, 17)
+graph_training() 
+--graph_evaluate('training_data.t7', 'full2_026000.t7', true, 17)

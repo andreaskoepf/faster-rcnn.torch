@@ -162,6 +162,10 @@ function Rect:vertices()
   })
 end
 
+function Rect:clone()
+  return Rect.new(self)
+end
+
 function Rect:__tostring()
   return string.format("{ min: (%.2f, %.2f), max: (%.2f, %.2f), size: (%.2f x %.2f) }", self.minX, self.minY, self.maxX, self.maxY, self:width(), self:height())
 end

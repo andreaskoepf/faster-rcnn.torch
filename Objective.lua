@@ -2,8 +2,19 @@ require 'cunn'
 require 'BatchIterator'
 require 'Localizer'
 
-function createObjective(pnet, cnet, weights, gradient, batch_iterator)
-  local training_data = batch_iterator.trainingData
+function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
+  local r = localizer:inputToFeatureRect(input_rect)
+  -- the use of math.min ensures correct handling of empty rects, 
+  -- +1 offset for top, left only is conversion from half-open 0-based interval
+  local s = feature_layer_output:size()
+  r = r:clip(Rect.new(0, 0, s[3], s[2]))
+  local idx = { {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
+  return feature_layer_output[idx], idx
+end
+
+function create_objective(pnet, cnet, weights, gradient, batch_iterator)
+  local cfg = batch_iterator.cfg
+  local bgclass = cfg.class_count + 1   -- background class
   local anchors = batch_iterator.anchors    
   local localizer = Localizer.new(pnet.outnode.children[5])
     
@@ -11,7 +22,7 @@ function createObjective(pnet, cnet, weights, gradient, batch_iterator)
   local cnll = nn.ClassNLLCriterion():cuda()
   local smoothL1 = nn.SmoothL1Criterion():cuda()
   smoothL1.sizeAverage = false
-  local kh, kw = trainingData.roi_pooling.kh, trainingData.roi_pooling.kw
+  local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
   local amp = nn.SpatialAdaptiveMaxPooling(kw, kh):cuda()
   
   function lossAndGradient(w)
@@ -35,24 +46,14 @@ function createObjective(pnet, cnet, weights, gradient, batch_iterator)
       
       local batch = batch_iterator:nextTraining()
       for i,x in ipairs(batch) do
-        
-      end
-      
-      while cls_count < 256 do
-      
-      
-        
-        -- get positive and negative anchors examples
-        local p = ground_truth[fn].positive_anchors
-        local n = anchors:sampleNegative(Rect.new(0, 0, img_size[3], img_size[2]), rois, 0.3, math.max(16, #p))
-        
-        -- convert batch to cuda if we are running on the gpu
-        img = img:cuda()
-        
+        local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
+        local p = x.positive        -- get positive and negative anchors examples
+        local n = x.negative
+
         -- run forward convolution
         local outputs = pnet:forward(img)
         
-        -- clear delta values
+        -- clear delta values for each new image
         for i,out in ipairs(outputs) do
           if not delta_outputs[i] then
             delta_outputs[i] = torch.FloatTensor():cuda()
@@ -60,10 +61,10 @@ function createObjective(pnet, cnet, weights, gradient, batch_iterator)
           delta_outputs[i]:resizeAs(out)
           delta_outputs[i]:zero()
         end
-       
-       local roi_pool_state = {}
-       local input_size = img:size()
-       local cnetgrad
+        
+        local roi_pool_state = {}
+        local input_size = img:size()
+        local cnetgrad
        
         -- process positive set
         for i,x in ipairs(p) do
@@ -116,7 +117,7 @@ function createObjective(pnet, cnet, weights, gradient, batch_iterator)
           table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
         end
         
-        -- send extracted roi-data through classification network
+         -- fine-tuning STAGE: send extracted roi-data through classification network
         
         -- create cnet input batch
         local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * 300)
@@ -167,8 +168,9 @@ function createObjective(pnet, cnet, weights, gradient, batch_iterator)
         
         creg_count = creg_count + #p
         ccls_count = ccls_count + 1
+        
       end
-     
+      
       -- scale gradient
       gradient:div(cls_count)
       

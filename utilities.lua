@@ -1,13 +1,14 @@
 require 'lfs' -- lua file system for directory listings
 require 'nn'
+require 'image'
 
-function list_files(directory_path, max_count)
+function list_files(directory_path, max_count, abspath)
   local l = {}
   for fn in lfs.dir(directory_path) do
     if max_count and #l >= max_count then
       break
     end
-    local full_fn = path.join(directory_path, fn)
+    local full_fn = abspath and path.join(directory_path, fn) or fn
     if lfs.attributes(full_fn, 'mode') == 'file' then 
       table.insert(l, full_fn)
     end
@@ -44,6 +45,22 @@ function shallow_copy(t)
     t2[k] = v
   end
   return t2
+end
+
+function deep_copy(obj, seen)
+  if type(obj) ~= 'table' then 
+    return obj 
+  end
+  if seen and seen[obj] then 
+    return seen[obj] 
+  end
+  local s = seen or {}
+  local res = setmetatable({}, getmetatable(obj))
+  s[obj] = res
+  for k, v in pairs(obj) do 
+    res[deep_copy(k, s)] = deep_copy(v, s) 
+  end
+  return res
 end
 
 function reverse(array)
@@ -153,4 +170,34 @@ end
 function normalize_debug(t)
   local lb, ub = t:min(), t:max()
   return (t -lb):div(ub-lb+1e-10)
+end
+
+function find_target_size(orig_w, orig_h, target_smaller_side, max_pixel_size)
+  local w, h
+  if orig_h < orig_w then
+    -- height is smaller than width, set h to target_size
+    w = math.min(orig_w * target_smaller_side/orig_h, max_pixel_size)
+    h = orig_h * w/orig_w
+  else
+    -- width is smaller than height, set w to target_size
+    h = math.min(orig_h * target_smaller_side/orig_w, max_pixel_size)
+    w = orig_w * h/orig_h
+  end
+  assert(w > 0 and h > 0)
+  return w, h
+end
+
+function load_image(fn, color_space, base_path)
+  if not path.isabs(fn) and base_path then
+    fn = path.join(base_path, fn)
+  end
+  local img = image.load(fn, 3, 'float')
+  if color_space == 'yuv' then
+    img = image.rgb2yuv(img)
+  elseif color_space == 'lab' then
+    img = image.rgb2lab(img)
+  elseif color_space == 'hsv' then
+    img = image.rgb2hsv(img)
+  end
+  return img
 end
