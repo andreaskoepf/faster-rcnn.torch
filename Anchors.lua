@@ -2,6 +2,8 @@ require 'Localizer'
 
 local Anchors = torch.class('Anchors')
 
+local BIN_SIZE = 16   -- granularity for mapping center points to nearby-anchors (for nearby_aversion)
+
 function Anchors:__init(proposal_net, scales)
   -- create localizers
   self.localizers = {}
@@ -16,6 +18,17 @@ function Anchors:__init(proposal_net, scales)
   self.w = torch.Tensor(#scales, 3, width, 2)
   self.h = torch.Tensor(#scales, 3, height, 2)
   
+  -- create simple map to enable finding of nearby anchors (e.g. enable conter-example training)
+  self.cx = {}
+  self.cy = {}
+  local function add(map, i, j, v, x)
+    local key = math.floor(x / BIN_SIZE)
+    if not map[key] then
+      map[key] = {}
+    end
+    table.insert(map[key], { i, j, v })
+  end
+  
   for i,s in ipairs(scales) do
     -- width, height for boxes with s^2 pixels with aspect ratios 1:1, 2:1, 1:2
     local a = s / math.sqrt(2)        
@@ -29,6 +42,7 @@ function Anchors:__init(proposal_net, scales)
         r = Rect.fromCenterWidthHeight(centerX, centerY, b[1], b[2])
         self.h[{i, j, y, 1}] = r.minY
         self.h[{i, j, y, 2}] = r.maxY
+        add(self.cy, i, j, y, centerY)      
       end
       
       for x=1,width do
@@ -37,6 +51,7 @@ function Anchors:__init(proposal_net, scales)
         r = Rect.fromCenterWidthHeight(centerX, centerY, b[1], b[2])
         self.w[{i, j, x, 1}] = r.minX
         self.w[{i, j, x, 2}] = r.maxX
+        add(self.cx, i, j, x, centerX)
       end
     end
   end
@@ -44,7 +59,28 @@ end
 
 function Anchors:get(layer, aspect, y, x)
   local w, h = self.w, self.h
-  return Rect.new(w[{layer, aspect, x, 1}], h[{layer, aspect, y, 1}], w[{layer, aspect, x, 2}], h[{layer, aspect, y, 2}])
+  local anchor_rect = Rect.new(w[{layer, aspect, x, 1}], h[{layer, aspect, y, 1}], w[{layer, aspect, x, 2}], h[{layer, aspect, y, 2}])
+  anchor_rect.layer = layer
+  anchor_rect.aspect = aspect
+  anchor_rect.index = { { aspect * 6 - 5, aspect * 6 }, y, x }
+  return anchor_rect
+end
+
+function Anchors:findNearby(centerX, centerY)
+  local found = {}
+  local xl, yl = self.cx[math.floor(centerX / BIN_SIZE)], self.cy[math.floor(centerY / BIN_SIZE)]
+  if xl and yl then
+    for i=1,#yl do
+      local y = yl[i]
+      for j=1,#xl do
+        local x = xl[j]
+        if y[1] == x[1] and y[2] == x[2] then
+          table.insert(found, self:get(y[1], y[2], y[3], x[3]))
+        end
+      end
+    end
+  end
+  return found
 end
 
 function Anchors:findRangesXY(rect, clip_rect)
@@ -57,6 +93,15 @@ function Anchors:findRangesXY(rect, clip_rect)
     end
     return low
   end
+  local function upper_bound(t, value)
+    local low, high = 1, t:nElement()
+    while low <= high do
+      local mid = math.floor((low + high) / 2)
+      if t[mid] > value then high = mid - 1
+      elseif t[mid] <= value then low = mid + 1 end
+    end
+    return low
+  end
   
   local ranges = {}
   local w,h = self.w, self.h
@@ -66,20 +111,20 @@ function Anchors:findRangesXY(rect, clip_rect)
       local clx, cly, cux, cuy  -- lower and upper bounds of clipping rect (indices)
       if clip_rect then
          -- all vertices of anchor must lie in clip_rect (e.g. input image rect)
-        clx = lower_bound(w[{i, j, {}, 1}], clip_rect.minX)    -- a.minX >= r.minX
-        cly = lower_bound(h[{i, j, {}, 1}], clip_rect.minY)    -- a.minY >= r.minY
-        cux = lower_bound(w[{i, j, {}, 2}], clip_rect.maxX)    -- a.maxX <= r.maxX
-        cuy = lower_bound(h[{i, j, {}, 2}], clip_rect.maxY)    -- a.maxY <= r.maxY
+        clx = lower_bound(w[{i, j, {}, 1}], clip_rect.minX)   -- xbegin: a.minX >= r.minX
+        cly = lower_bound(h[{i, j, {}, 1}], clip_rect.minY)   -- ybegin: a.minY >= r.minY
+        cux = upper_bound(w[{i, j, {}, 2}], clip_rect.maxX)   -- xend:   a.maxX > r.maxX
+        cuy = upper_bound(h[{i, j, {}, 2}], clip_rect.maxY)   -- yend:   a.maxY > r.maxY
       end
     
       local l = { layer = i, aspect = j }
       
       -- at least one vertex must lie in rect
-      l.lx = lower_bound(w[{i, j, {}, 2}], rect.minX)   -- a.maxX > r.minX 
-      l.ly = lower_bound(h[{i, j, {}, 2}], rect.minY)   -- a.maxY > r.minY
-      l.ux = lower_bound(w[{i, j, {}, 1}], rect.maxX)   -- a.minX > r.maxX
-      l.uy = lower_bound(h[{i, j, {}, 1}], rect.maxY)   -- a.minY > r.maxY
-      
+      l.lx = upper_bound(w[{i, j, {}, 2}], rect.minX)   -- xbegin: a.maxX > r.minX 
+      l.ly = upper_bound(h[{i, j, {}, 2}], rect.minY)   -- ybegin: a.maxY > r.minY
+      l.ux = lower_bound(w[{i, j, {}, 1}], rect.maxX)   -- xend:   a.minX >= r.maxX
+      l.uy = lower_bound(h[{i, j, {}, 1}], rect.maxY)   -- yend:   a.minY >= r.maxY
+
       if clip_rect then
         l.lx = math.max(l.lx, clx)
         l.ly = math.max(l.ly, cly)
@@ -172,7 +217,7 @@ function Anchors:sampleNegative(image_rect, roi_list, neg_threshold, count)
     
     if not match then
       retry = 0
-      table.insert(neg, anchor_rect)
+      table.insert(neg, { anchor_rect })
     else
       retry = retry + 1 
     end

@@ -25,7 +25,20 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
   local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
   local amp = nn.SpatialAdaptiveMaxPooling(kw, kh):cuda()
   
-  function lossAndGradient(w)
+  local function cleanAnchors(examples, outputs)
+    local i = 1
+    while i <= #examples do
+      local anchor = examples[i][1]
+      local fmSize = outputs[anchor.layer]:size()
+      if anchor.index[2] > fmSize[2] or anchor.index[3] > fmSize[3] then
+        table.remove(examples, i)   -- accessing would cause ouf of range exception
+      else
+        i = i + 1
+      end 
+    end
+  end
+  
+  local function lossAndGradient(w)
       if w ~= weights then
         weights:copy(w)
       end
@@ -53,6 +66,10 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
         -- run forward convolution
         local outputs = pnet:forward(img)
         
+        -- ensure all example anchors lie withing existing feature planes 
+        cleanAnchors(p, outputs)
+        cleanAnchors(n, outputs)
+        
         -- clear delta values for each new image
         for i,out in ipairs(outputs) do
           if not delta_outputs[i] then
@@ -70,12 +87,12 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
         for i,x in ipairs(p) do
           local anchor = x[1]
           local roi = x[2]
-          local l = x[1].layer
+          local l = anchor.layer
           
           local out = outputs[l]
           local delta_out = delta_outputs[l]
            
-          local idx = x[1].index
+          local idx = anchor.index
           local v = out[idx]
           local d = delta_out[idx]
             
@@ -94,16 +111,17 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
           
           -- pass through adaptive max pooling operation
           local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[5])
-          local po = amp:forward(pi):view(7 * 7 * 300)
+          local po = amp:forward(pi):view(kh * kw * 300)
           table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
         end
         
         -- process negative
         for i,x in ipairs(n) do
-          local l = x.layer
+          local anchor = x[1]
+          local l = anchor.layer
           local out = outputs[l]
           local delta_out = delta_outputs[l]
-          local idx = x.index
+          local idx = anchor.index
           local v = out[idx]
           local d = delta_out[idx]
           
@@ -112,8 +130,8 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
           d[{{1,2}}]:add(dc)
           
           -- pass through adaptive max pooling operation
-          local pi, idx = extract_roi_pooling_input(x, localizer, outputs[5])
-          local po = amp:forward(pi):view(7 * 7 * 300)
+          local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[5])
+          local po = amp:forward(pi):view(kh * kw * 300)
           table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
         end
         

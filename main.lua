@@ -324,7 +324,7 @@ end
 function graph_training(network_filename)
   
   -- TODO: create function to create training configuration
-  local ground_truth = read_csv_file('/home/koepf/datasets/brickset_all/boxes.csv')
+  local ground_truth = read_csv_file('/home/team/datasets/brickset_all/boxes.csv')
   local image_file_names = keys(ground_truth)
   
   test_size = test_size or 0.2 -- 80:20 split
@@ -334,30 +334,34 @@ function graph_training(network_filename)
   shuffle(image_file_names)
   local test_set = remove_tail(image_file_names, test_size)
   
-  local background_file_names = list_files('/home/koepf/datasets/background', nil, true)
+  local background_file_names = list_files('/home/team/datasets/background', nil, true)
+  
+  local cfg = {
+    class_count = 16,  -- excluding background class
+    target_smaller_side = 450,
+    --scales = { 48, 96, 192, 384 },
+    scales = { 32, 64, 128, 256 },
+    max_pixel_size = 1000,
+    normalization = { method = 'contrastive', width = 7 },
+    color_space = 'yuv',
+    roi_pooling = { kw = 6, kh = 6 },
+    examples_base_path = '/home/team/datasets/brickset_all/',
+    background_base_path = '/home/team/datasets/background/',
+    batch_size = 256,
+    positive_threshold = 0.5, 
+    negative_threshold = 0.25,
+    best_match = true,
+    nearby_aversion = true
+  }
   
   local training_data = {
     ground_truth = ground_truth, 
     train_file_names = image_file_names,
     test_file_name = test_set,
     background_file_names = background_file_names,
-    cfg = {
-      class_count = 16,  -- excluding background class
-      target_smaller_side = 450, 
-      scales = { 48, 96, 192, 384 },
-      max_pixel_size = 1000,
-      normalization = { method = 'contrastive', width = 7 },
-      color_space = 'yuv',
-      roi_pooling = { kw = 7, kh = 7 },
-      examples_base_path = '/home/koepf/datasets/brickset_all/',
-      background_base_path = '/home/koepf/datasets/background/', 
-      batch_size = 500,
-      positive_threshold = 0.6, 
-      negative_threshold = 0.3,
-      best_match = true
-    }
+    cfg = cfg
   }
-    
+  
   local training_stats = {}
   
   local stored
@@ -367,9 +371,8 @@ function graph_training(network_filename)
     training_stats = stored.stats
   end
   
-  local class_count = 16 + 1
   local pnet = create_proposal_net()
-  local cnet = create_classifaction_net(kw, kh, 300, class_count)
+  local cnet = create_classifaction_net(cfg.roi_pooling.kw, cfg.roi_pooling.kh, 300, cfg.class_count + 1)
 
   pnet:cuda()
   cnet:cuda()

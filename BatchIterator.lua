@@ -170,20 +170,40 @@ function BatchIterator:nextTraining(count)
     -- find positive examples
     local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
     local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
-    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(16, #positive))
+    
+    -- random negative examples
+    local negative = {} --self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(16, #positive))
+    
+    if cfg.nearby_aversion then
+      -- add all nearby negative anchors
+      for i,p in ipairs(positive) do
+        local cx, cy = p[1]:center()
+        local nearbyAnchors = self.anchors:findNearby(cx, cy)
+        for i,a in ipairs(nearbyAnchors) do
+          if Rect.IoU(p[1], a) < cfg.negative_threshold then
+            table.insert(negative, { a })
+          end
+        end
+      end
+    end
     
     -- debug boxes
-    --[[
-    local red = torch.Tensor({1,0,0})
-    for i=1,#negative do
-      draw_rectangle(img, negative[i], red)
+    if false then
+      local dimg = image.yuv2rgb(img)
+      local red = torch.Tensor({1,0,0})
+      local white = torch.Tensor({1,1,1})
+      for i=1,#rois do
+        draw_rectangle(dimg, rois[i].rect, white)
+      end
+      for i=1,#negative do
+        draw_rectangle(dimg, negative[i][1], red)
+      end
+      local green = torch.Tensor({0,1,0})
+      for i=1,#positive do
+        draw_rectangle(dimg, positive[i][1], green)
+      end
+      image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
     end
-    local green = torch.Tensor({0,1,0})
-    for i=1,#positive do
-      draw_rectangle(img, positive[i][1], green)
-    end
-    image.saveJPG(string.format('test%d.jpg', self.training.i), img)
-    ]]
     
     table.insert(batch, { img = img, positive = positive, negative = negative })
     --print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
