@@ -23,7 +23,8 @@ local testset_path = '/home/koepf/datasets/realbricks/'
   --scales = { 48, 96, 192, 384 },
   scales = { 32, 64, 128, 256 },
   max_pixel_size = 1000,
-  normalization = { method = 'contrastive', width = 7 },
+  --normalization = { method = 'contrastive', width = 7 },
+  normalization = { method = 'none' },
   color_space = 'yuv',
   roi_pooling = { kw = 6, kh = 6 },
   examples_base_path = '/home/koepf/datasets/brickset_all/',
@@ -31,6 +32,23 @@ local testset_path = '/home/koepf/datasets/realbricks/'
   batch_size = 256,
   positive_threshold = 0.5, 
   negative_threshold = 0.25,
+  best_match = true,
+  nearby_aversion = true
+}
+
+ local imgnet_cfg = {
+  class_count = 200,  -- excluding background class
+  target_smaller_side = 600,
+  scales = { 64, 128, 256, 512 },
+  max_pixel_size = 1000,
+  normalization = { method = 'none' },
+  color_space = 'yuv',
+  roi_pooling = { kw = 6, kh = 6 },
+  examples_base_path = '',
+  background_base_path = '',
+  batch_size = 256,
+  positive_threshold = 0.6, 
+  negative_threshold = 0.3,
   best_match = true,
   nearby_aversion = true
 }
@@ -349,6 +367,6 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
 end
 
 --graph_training(duplo_cfg, 'duplo', 'duplo.t7', 'av_036000.t7')
-graph_training(duplo_cfg, 'imgnet', 'ILSVRC2015_DET.t7')
+graph_training(imgnet_cfg, 'imgnet', 'ILSVRC2015_DET.t7')
  
 --graph_evaluate(duplo_cfg, 'duplo.t7', 'duplo_036000.t7', true, 17)
