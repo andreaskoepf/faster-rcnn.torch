@@ -263,10 +263,10 @@ function graph_evaluate(cfg, training_data_filename, network_filename, normalize
 end
 
 function graph_training(cfg, snapshot_prefix, training_data_filename, network_filename)
-  
+  print('Reading training data file \'' .. training_data_filename .. '\'.')
   local training_data = load_obj(training_data_filename)
   local file_names = keys(training_data.ground_truth)
-  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; casses: %d; Background: %d)", 
+  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)", 
       training_data.dataset_name, 
       #file_names,
       #training_data.class_names,
@@ -349,6 +349,6 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
 end
 
 --graph_training(duplo_cfg, 'duplo', 'duplo.t7', 'av_036000.t7')
-graph_training('imgnet', 'ILSVRC2015_DET.t7')
+graph_training(duplo_cfg, 'imgnet', 'ILSVRC2015_DET.t7')
  
 --graph_evaluate(duplo_cfg, 'duplo.t7', 'duplo_036000.t7', true, 17)
