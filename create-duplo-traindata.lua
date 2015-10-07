@@ -63,7 +63,8 @@ function create_training_data(dataset_name, csv_file_name, background_dir, outpu
     background_files = list_files(background_dir, nil, false)
   end
 
-  print(string.format('Total images: %d; classes: %d; train_set: %d; validation_set: %d', #file_names, #class_names, #training_set, #validation_set))
+  print(string.format('Total images: %d; classes: %d; train_set: %d; validation_set: %d; background: %d', 
+    #file_names, #class_names, #training_set, #validation_set, #background_files))
   save_obj(
     output_fn,
     {

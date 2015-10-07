@@ -8,9 +8,9 @@ function list_files(directory_path, max_count, abspath)
     if max_count and #l >= max_count then
       break
     end
-    local full_fn = abspath and path.join(directory_path, fn) or fn
+    local full_fn = path.join(directory_path, fn)
     if lfs.attributes(full_fn, 'mode') == 'file' then 
-      table.insert(l, full_fn)
+      table.insert(l, abspath and full_fn or fn)
     end
   end
   return l

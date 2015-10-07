@@ -7,7 +7,7 @@ local ground_truth = {}
 local class_names = {}
 local class_index = {}
 
-function import_file(fn, name_table)
+function import_file(anno_base, data_base, fn, name_table)
   local x = xml.load(fn)
   local a = x:find('annotation')
   local folder = a:find('folder')[1]
@@ -34,7 +34,10 @@ function import_file(fn, name_table)
         class_index[name] = #class_names 
       end 
       
-      local image_path = path.join(folder, filename) .. '.JPEG'
+      local image_path = path.join(data_base, path.relpath(fn, anno_base))
+      image_path = string.sub(image_path, 1, #image_path - 3) .. 'JPEG'
+      
+      --local image_path = path.join(folder, filename) .. '.JPEG'
       table.insert(name_table, image_path)
       
       local roi = {
@@ -53,15 +56,15 @@ function import_file(fn, name_table)
   end
 end
 
-function import_directory(directory_path, recursive, name_table)
+function import_directory(anno_base, data_base, directory_path, recursive, name_table)
    for fn in lfs.dir(directory_path) do
     local full_fn = path.join(directory_path, fn)
     local mode = lfs.attributes(full_fn, 'mode') 
-    if recursive and mode == 'directory' and fn ~= '.' and fn ~= '..' then 
-      import_directory(full_fn, true, name_table)
+    if recursive and mode == 'directory' and fn ~= '.' and fn ~= '..' then
+      import_directory(anno_base, data_base, full_fn, true, name_table)
       collectgarbage()
     elseif mode == 'file' and string.sub(fn, -4):lower() == '.xml' then
-      import_file(full_fn, name_table)
+      import_file(anno_base, data_base, full_fn, name_table)
     end
     if #ground_truth > 10 then
       return
@@ -70,11 +73,13 @@ function import_directory(directory_path, recursive, name_table)
   return l
 end
 
-function create_ground_truth_file(dataset_name, train_annotation_dir, valid_annotation_dir, output_fn)
+-- recursively search through training and validation directories and import all xml files
+-- use simple file-name mapping strategy: relies on unique file names
+function create_ground_truth_file(dataset_name, train_annotation_dir, val_annotation_dir, train_data_dir, val_data_dir, output_fn)
   local training_set = {}
   local validation_set = {}
-  import_directory(train_annotation_dir, true, training_set)
-  import_directory(valid_annotation_dir, true, validation_set)
+  import_directory(train_annotation_dir, train_data_dir, train_annotation_dir, true, training_set)
+  import_directory(val_annotation_dir, val_data_dir, val_annotation_dir, true, validation_set)
   local file_names = keys(ground_truth)
   print(string.format('Total images: %d; classes: %d; train_set: %d; validation_set: %d', #file_names, #class_names, #training_set, #validation_set))
   save_obj(
@@ -95,5 +100,7 @@ create_ground_truth_file(
   'ILSVRC2015_DET', 
   '/data/imagenet/ILSVRC2015/Annotations/DET/train', 
   '/data/imagenet/ILSVRC2015/Annotations/DET/val',
+  '/data/imagenet/ILSVRC2015/Data/DET/train',
+  '/data/imagenet/ILSVRC2015/Data/DET/val',
   'ILSVRC2015_DET.t7'
 )

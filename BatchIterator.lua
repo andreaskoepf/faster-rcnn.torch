@@ -93,7 +93,7 @@ function BatchIterator:__init(pnet, training_data)
   -- index tensors define evaluation order
   self.training = { order = torch.IntTensor(), list = training_data.training_set }
   self.validation = { order = torch.IntTensor(), list = training_data.validation_set }
-  self.background = { order = torch.IntTensor(), list = training_data.background_file_names or {} }
+  self.background = { order = torch.IntTensor(), list = training_data.background_files or {} }
   
   randomize_order(self.training, self.validation, self.background)
 end
@@ -146,12 +146,13 @@ function BatchIterator:nextTraining(count)
     local img = load_image(fn, cfg.color_space, cfg.background_base_path)
     img = self:processImage(img)
     local img_size = img:size()        -- get final size
-    assert(img_size[2] >= 64 and img_size[3] >= 64)
-    local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
-    local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
-    table.insert(batch, { img = img, positive = {}, negative = negative })
-    count = count - #negative
-    --print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
+    if img_size[2] >= 128 and img_size[3] >= 128 then
+      local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
+      local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
+      table.insert(batch, { img = img, positive = {}, negative = negative })
+      count = count - #negative
+      --print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
+    end
   end
   
   while count > 0 do

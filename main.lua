@@ -4,7 +4,6 @@ require 'optim'
 require 'image'
 require 'nngraph'
 require 'cunn'
-require 'SmoothL1Criterion'
 require 'nms'
 
 require 'utilities'
@@ -184,12 +183,15 @@ function graph_evaluate(cfg, training_data_filename, network_filename, normalize
     
       -- NON-MAXIMUM SUPPRESSION
       local bb = torch.Tensor(#matches, 4)
+      local score = torch.Tensor(#matches, 1)
       for i=1,#matches do
         bb[i] = matches[i].r:totensor()
+        score[i] = matches[i].p
       end
       
       local iou_threshold = 0.5
       local pick = nms(bb, iou_threshold, 'area')
+      --local pick = nms(bb, iou_threshold, score)
       local candidates = {}
       pick:apply(function (x) table.insert(candidates, matches[x]) end )
   
@@ -222,7 +224,7 @@ function graph_evaluate(cfg, training_data_filename, network_filename, normalize
         x.class = c[1]
         x.confidence = p[1]
         
-        if x.class ~= bgclass and math.exp(x.confidence) > 0.01 then
+        if x.class ~= bgclass then --and math.exp(x.confidence) > 0.01 then
           if not yclass[x.class] then
             yclass[x.class] = {}
           end
@@ -264,12 +266,11 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
   
   local training_data = load_obj(training_data_filename)
   local file_names = keys(training_data.ground_truth)
-  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; casses: %d", 
+  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; casses: %d; Background: %d)", 
       training_data.dataset_name, 
       #file_names,
-      #training_data.class_names))
-  
-
+      #training_data.class_names,
+      #training_data.background_files))
   
 --[[   
   local cfg = {
@@ -339,7 +340,7 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
     if i%1000 == 0 then
       -- save snapshot
       -- todo: change weight storage (for pnet and cnet)
-      save_model(string.format('%s_%06d.t7', i), snapshot_prefix, weights, opt, training_stats)
+      save_model(string.format('%s_%06d.t7', snapshot_prefix, i), weights, opt, training_stats)
     end
     
   end
@@ -347,7 +348,7 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
   -- compute positive anchors, add anchors to ground-truth file
 end
 
---graph_training('duplo', 'duplo.t7')
---graph_training('imgnet', 'ILSVRC2015_DET.t7')
+--graph_training(duplo_cfg, 'duplo', 'duplo.t7', 'av_036000.t7')
+graph_training('imgnet', 'ILSVRC2015_DET.t7')
  
-graph_evaluate(duplo_cfg, 'duplo.t7', 'av_011000.t7', true, 17)
+--graph_evaluate(duplo_cfg, 'duplo.t7', 'duplo_036000.t7', true, 17)
