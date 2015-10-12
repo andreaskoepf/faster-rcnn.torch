@@ -38,8 +38,10 @@ local testset_path = '/home/koepf/datasets/realbricks/'
 
  local imgnet_cfg = {
   class_count = 200,  -- excluding background class
-  target_smaller_side = 600,
-  scales = { 64, 128, 256, 512 },
+  --target_smaller_side = 600,
+  --scales = { 64, 128, 256, 512 },
+  target_smaller_side = 480,
+  scales = { 48, 96, 192, 384 },
   max_pixel_size = 1000,
   normalization = { method = 'none' },
   color_space = 'yuv',

@@ -18,7 +18,7 @@ function Anchors:__init(proposal_net, scales)
   self.w = torch.Tensor(#scales, 3, width, 2)
   self.h = torch.Tensor(#scales, 3, height, 2)
   
-  -- create simple map to enable finding of nearby anchors (e.g. enable conter-example training)
+  -- create simple map to enable finding of nearby anchors (e.g. enable counter-example training)
   self.cx = {}
   self.cy = {}
   local function add(map, i, j, v, x)
@@ -140,18 +140,19 @@ function Anchors:findRangesXY(rect, clip_rect)
 
     end
   end
-  
+
   return ranges
 end
 
 function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold, include_best)
   local matches = {}
-  local best
+  local best_set, best_iou
   
   for i,roi in ipairs(roi_list) do
-  
+    
     if include_best then
-      best = Rect.empty()   -- best is set to nil if a positive entry was found
+      best_set = {}   -- best is set to nil if a positive entry was found
+      best_iou = -1
     end 
     
     -- evaluate IoU for all overlapping anchors
@@ -170,20 +171,26 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
           local v = Rect.IoU(roi.rect, anchor_rect)
           if v > pos_threshold then
             table.insert(matches, { anchor_rect, roi })
-            best = nil
-          elseif v > neg_threshold and best and v > Rect.IoU(roi.rect, best) then
-            best = anchor_rect
+            best_set = nil
+          elseif v > neg_threshold and best_set and v >= best_iou then
+            if v - 0.025 > best_iou then
+              best_set = {}
+            end
+            table.insert(best_set, anchor_rect)
+            best_iou = v
           end
         end
       end
     end
 
-    if best and not best:isEmpty() then
-      table.insert(matches, { best, roi })
+    if best_set and best_iou > 0 then
+      for i,v in ipairs(best_set) do
+        table.insert(matches, { v, roi })
+      end
     end
     
   end
-  
+
   return matches
 end
 

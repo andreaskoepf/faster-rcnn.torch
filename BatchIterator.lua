@@ -140,87 +140,103 @@ function BatchIterator:nextTraining(count)
   local batch = {}
   count = count or cfg.batch_size
   
+  -- use local function to allow early exits in case of to image load failures
+  local function try_add_next()
+    local fn = next_entry(self.training)
+    local rois = deep_copy(self.ground_truth[fn].rois)   -- copy RoIs ground-truth data (will be manipulated)
+  
+    -- load image, wrap with pcall since image net contains invalid non-jpeg files
+    local status, img = pcall(function () return load_image(fn, cfg.color_space, cfg.examples_base_path) end)
+    if not status then
+      -- pcall failed, corrupted image file?
+      print(string.format("Invalid image '%s': %s", fn, img))
+      return 0
+    end
+    
+    local img, rois = self:processImage(img, rois)
+    local img_size = img:size()        -- get final size
+    if img_size[2] < 128 or img_size[3] < 128 then
+        -- notify user about skipped image
+        print(string.format("Warning: Skipping image '%s'. Invalid size after process: (%dx%d)", fn, img_size[3], img_size[2]))  
+      return 0
+    end
+      
+    -- find positive examples
+    local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
+    local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
+    
+    -- random negative examples
+    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, 16)
+    local count = #positive + #negative
+     
+    if cfg.nearby_aversion then
+      local nearby_negative = {}
+      -- add all nearby negative anchors
+      for i,p in ipairs(positive) do
+        local cx, cy = p[1]:center()
+        local nearbyAnchors = self.anchors:findNearby(cx, cy)
+        for i,a in ipairs(nearbyAnchors) do
+          if Rect.IoU(p[1], a) < cfg.negative_threshold then
+            table.insert(nearby_negative, { a })
+          end
+        end
+      end
+      
+      local c = math.min(#positive, count)
+      shuffle_n(nearby_negative, c)
+      for i=1,c do
+        table.insert(negative, nearby_negative[i])
+        count = count + 1
+      end
+    end
+    
+    -- debug boxes
+    if false then
+      local dimg = image.yuv2rgb(img)
+      local red = torch.Tensor({1,0,0})
+      local white = torch.Tensor({1,1,1})
+      
+      for i=1,#negative do
+      --  draw_rectangle(dimg, negative[i][1], red)
+      end
+      local green = torch.Tensor({0,1,0})
+      for i=1,#positive do
+        draw_rectangle(dimg, positive[i][1], green)
+      end
+      
+      for i=1,#rois do
+        draw_rectangle(dimg, rois[i].rect, white)
+      end
+      image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
+    end
+  
+    table.insert(batch, { img = img, positive = positive, negative = negative })
+    print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
+    return count
+  end
+  
   -- add a background examples
   if #self.background.list > 0 then
     local fn = next_entry(self.background)
-    local img = load_image(fn, cfg.color_space, cfg.background_base_path)
-    img = self:processImage(img)
-    local img_size = img:size()        -- get final size
-    if img_size[2] >= 128 and img_size[3] >= 128 then
-      local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
-      local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
-      table.insert(batch, { img = img, positive = {}, negative = negative })
-      count = count - #negative
-      print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
+    local status, img = pcall(function () return load_image(fn, cfg.color_space, cfg.background_base_path) end)
+    if status then
+      img = self:processImage(img)
+      local img_size = img:size()        -- get final size
+      if img_size[2] >= 128 and img_size[3] >= 128 then
+        local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
+        local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
+        table.insert(batch, { img = img, positive = {}, negative = negative })
+        count = count - #negative
+        -- print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
+      end
+    else
+      -- pcall failed, corrupted image file?
+      print(string.format("Invalid image '%s': %s", fn, img))
     end
   end
   
   while count > 0 do
-  
-    -- select next image file name and get ROIs 
-    local fn = next_entry(self.training)
-    local rois = deep_copy(self.ground_truth[fn].rois)   -- copy RoIs ground-truth data (will be manipulated)
-    
-    -- load image
-    local img = load_image(fn, cfg.color_space, cfg.examples_base_path)    
-    img, rois = self:processImage(img, rois)
-    
-    local img_size = img:size()        -- get final size
-    if img_size[2] >= 128 and img_size[3] >= 128 then
-          
-      -- find positive examples
-      local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
-      local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
-      count = count - #positive
-      -- random negative examples
-      local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, 16)
-      count = count - #negative
-       
-      if cfg.nearby_aversion then
-        local nearby_negative = {}
-        -- add all nearby negative anchors
-        for i,p in ipairs(positive) do
-          local cx, cy = p[1]:center()
-          local nearbyAnchors = self.anchors:findNearby(cx, cy)
-          for i,a in ipairs(nearbyAnchors) do
-            if Rect.IoU(p[1], a) < cfg.negative_threshold then
-              table.insert(nearby_negative, { a })
-            end
-          end
-        end
-        
-        local c = math.min(#positive, count)
-        shuffle_n(nearby_negative, c)
-        for i=1,c do
-          table.insert(negative, nearby_negative[i])
-          count = count - 1
-        end
-      end
-      
-      -- debug boxes
-      if false then
-        local dimg = image.yuv2rgb(img)
-        local red = torch.Tensor({1,0,0})
-        local white = torch.Tensor({1,1,1})
-        for i=1,#rois do
-          draw_rectangle(dimg, rois[i].rect, white)
-        end
-        for i=1,#negative do
-          draw_rectangle(dimg, negative[i][1], red)
-        end
-        local green = torch.Tensor({0,1,0})
-        for i=1,#positive do
-          draw_rectangle(dimg, positive[i][1], green)
-        end
-        image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
-      end
-    
-      table.insert(batch, { img = img, positive = positive, negative = negative })
-      print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
-    else
-      -- notify user about skipped image
-      print(string.format("Warning: Skipping image '%s'. Invalid size after process: (%dx%d)", fn, img_size[3], img_size[2]))  
-    end
+    count = count - try_add_next(batch, fn, rois)
   end
   
   return batch
