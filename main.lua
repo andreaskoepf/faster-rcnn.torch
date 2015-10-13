@@ -369,6 +369,6 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
 end
 
 --graph_training(duplo_cfg, 'duplo', 'duplo.t7', 'av_036000.t7')
-graph_training(imgnet_cfg, 'imgnet', 'ILSVRC2015_DET.t7')
+graph_training(imgnet_cfg, 'imgnet', 'ILSVRC2015_DET.t7', 'imgnet_001000.t7')
  
 --graph_evaluate(duplo_cfg, 'duplo.t7', 'duplo_036000.t7', true, 17)

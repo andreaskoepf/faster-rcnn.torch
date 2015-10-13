@@ -152,9 +152,15 @@ function BatchIterator:nextTraining(count)
       print(string.format("Invalid image '%s': %s", fn, img))
       return 0
     end
+
+    local img_size = img:size()
+    if img_size[1] ~= 3 then
+      print(string.format("Warning: Skipping image '%s'. Unexpected channel count: %d", fn, img_size[1]))
+      return 0
+    end 
     
     local img, rois = self:processImage(img, rois)
-    local img_size = img:size()        -- get final size
+    img_size = img:size()        -- get final size
     if img_size[2] < 128 or img_size[3] < 128 then
         -- notify user about skipped image
         print(string.format("Warning: Skipping image '%s'. Invalid size after process: (%dx%d)", fn, img_size[3], img_size[2]))  
@@ -191,7 +197,7 @@ function BatchIterator:nextTraining(count)
     end
     
     -- debug boxes
-    if false then
+    if #positive == 0 then
       local dimg = image.yuv2rgb(img)
       local red = torch.Tensor({1,0,0})
       local white = torch.Tensor({1,1,1})
