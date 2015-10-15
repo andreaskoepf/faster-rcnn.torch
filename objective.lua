@@ -12,7 +12,7 @@ function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
   return feature_layer_output[idx], idx
 end
 
-function create_objective(model, weights, gradient, batch_iterator)
+function create_objective(model, weights, gradient, batch_iterator, stats)
   local cfg = model.cfg
   local pnet = model.pnet
   local cnet = model.cnet
@@ -199,12 +199,21 @@ function create_objective(model, weights, gradient, batch_iterator)
       -- scale gradient
       gradient:div(cls_count)
       
+      local pcls = cls_loss / cls_count     -- proposal classification (bg/fg)
+      local preg = reg_loss / reg_count     -- proposal bb regression
+      local dcls = ccls_loss / ccls_count   -- detection classification
+      local dreg = creg_loss / creg_count   -- detection bb finetuning
+      
       print(string.format('prop: cls: %f (%d), reg: %f (%d); det: cls: %f, reg: %f', 
-        cls_loss / cls_count, cls_count, reg_loss / reg_count, reg_count,
-        ccls_loss / ccls_count, creg_loss / creg_count)
+        pcls, cls_count, preg, reg_count, dcls, dreg)
       )
       
-      local loss = cls_loss / cls_count + reg_loss / reg_count
+      table.insert(stats.pcls, pcls)
+      table.insert(stats.preg, preg)
+      table.insert(stats.dcls, dcls)
+      table.insert(stats.dreg, dreg)
+      
+      local loss = pcls + reg_loss
       return loss, gradient
     end
     
