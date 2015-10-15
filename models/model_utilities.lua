@@ -25,11 +25,11 @@ function create_proposal_net(layers, anchor_nets)
   
   -- creates anchor network which reduces to a 256 dimensional vector and 
   -- then to anchors outputs for 3 aspect ratios 
-  local function AnchorNetwork(nInputPlane, kernelWidth)
+  local function AnchorNetwork(inputs, n, kernelWidth)
     local net = nn.Sequential()
-    net:add(nn.SpatialConvolution(nInputPlane, 256, kernelWidth,kernelWidth, 1,1))
+    net:add(nn.SpatialConvolution(inputs, n, kernelWidth,kernelWidth, 1,1))
     net:add(nn.PReLU())
-    net:add(nn.SpatialConvolution(256, 3 * (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
+    net:add(nn.SpatialConvolution(n, 3 * (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
     return net
   end
 
@@ -37,35 +37,24 @@ function create_proposal_net(layers, anchor_nets)
     
   local conv_outputs = {}
   
-  local nInputPlane = 3
+  local inputs = 3
   local prev = input
   for i,l in ipairs(layers) do
     local net = nn.Sequential()
-    ConvPoolBlock(net, nInputPlane, l.filters, l.kW, l.kH, l.padW, l.padH, l.dropout, l.conv_steps)
-    nInputPlane = l.filters
+    ConvPoolBlock(net, inputs, l.filters, l.kW, l.kH, l.padW, l.padH, l.dropout, l.conv_steps)
+    inputs = l.filters
     prev = net(prev)
     table.insert(conv_outputs, prev)
   end
   
-  local anchor_nets = {
-    { kW=3, n=256, input=3 },   -- input refers to the 'layer' defined above
-    { kW=3, n=256, input=4 },
-    { kW=5, n=256, input=4 },
-    { kW=7, n=256, input=4 }
-  }
+  local proposal_outputs = {}
+  for i,a in ipairs(anchor_nets) do
+    table.insert(proposal_outputs, AnchorNetwork(layers[a.input].filters, a.n, a.kW)(conv_outputs[a.input]))
+  end
+  table.insert(proposal_outputs, conv_outputs[#conv_outputs])
   
-  -- split the main network into two parts because we build 
-  -- region proposals for the smallest scale after 3 max-pooling steps (with a input stride of 8 instead of 16)
-    
-  local convout1 = net1(input)
-  local convout2 = net2(convout1)
-  local a1 = AnchorNetwork(200, 3)(convout1)
-  local a2 = AnchorNetwork(300, 3)(convout2)
-  local a3 = AnchorNetwork(300, 5)(convout2)
-  local a4 = AnchorNetwork(300, 7)(convout2)
-  
-    -- create multi-output module
-  local model = nn.gModule({ input }, { a1, a2, a3, a4, convout2 })
+    -- create proposal net module, outputs: anchor net outputs followed by last conv-layer output
+  local model = nn.gModule({ input }, proposal_outputs)
   
   local function init(module, name)
     local function init_module(m)
@@ -83,16 +72,19 @@ function create_proposal_net(layers, anchor_nets)
   return model
 end
 
-function create_classifaction_net(kw, kh, planes, class_count)
+function create_classification_net(inputs, class_count, class_layers)
   -- create classifiaction network
   local net = nn.Sequential()
   
-  net:add(nn.Linear(kh * kw * planes, 1024))
-  net:add(nn.PReLU())
-  net:add(nn.Dropout(0.5))
-  net:add(nn.Linear(1024, 1024))
-  net:add(nn.PReLU())
-  net:add(nn.Dropout(0.5))
+  local prev_inputs = inputs
+  for i,l in ipairs(class_layers) do
+    net:add(nn.Linear(prev_inputs, l.n))
+    net:add(nn.PReLU())
+    if l.dropout and l.dropout > 0 then
+      net:add(nn.Dropout(l.dropout))
+    end
+    prev_inputs = l.n
+  end
   
   local input = nn.Identity()()
   local node = net(input)
@@ -100,15 +92,15 @@ function create_classifaction_net(kw, kh, planes, class_count)
   -- now the network splits into regression and classification branches
   
   -- regression output
-  local rout = nn.Linear(1024, 4)(node)
+  local rout = nn.Linear(prev_inputs, 4)(node)
   
   -- classification output
   local cnet = nn.Sequential()
-  cnet:add(nn.Linear(1024, class_count))
+  cnet:add(nn.Linear(prev_inputs, class_count))
   cnet:add(nn.LogSoftMax())
   local cout = cnet(node)
   
-  -- create multi-output module
+  -- create bbox finetuning + classification output
   local model = nn.gModule({ input }, { rout, cout })
 
   local function init(module, name)
@@ -127,12 +119,14 @@ function create_classifaction_net(kw, kh, planes, class_count)
   return model
 end
 
-function create_model(cfg, layers, anchor_nets)
+function create_model(cfg, layers, anchor_nets, class_layers)
+  local cnet_inputs = cfg.roi_pooling.kh * cfg.roi_pooling.kw * layers[#layers].filters
   local model = 
   {
     cfg = cfg,
+    layers = layers,
     pnet = create_proposal_net(layers, anchor_nets),
-    cnet = create_classification_net(cfg.roi_pooling.kw, cfg.roi_pooling.kh, 300, cfg.class_count + 1)
+    cnet = create_classification_net(cnet_inputs, cfg.class_count + 1, class_layers)
   }
   return model
 end

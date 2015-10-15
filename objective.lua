@@ -12,8 +12,11 @@ function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
   return feature_layer_output[idx], idx
 end
 
-function create_objective(pnet, cnet, weights, gradient, batch_iterator)
-  local cfg = batch_iterator.cfg
+function create_objective(model, weights, gradient, batch_iterator)
+  local cfg = model.cfg
+  local pnet = model.pnet
+  local cnet = model.cnet
+  
   local bgclass = cfg.class_count + 1   -- background class
   local anchors = batch_iterator.anchors    
   local localizer = Localizer.new(pnet.outnode.children[5])
@@ -23,6 +26,7 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
   local smoothL1 = nn.SmoothL1Criterion():cuda()
   smoothL1.sizeAverage = false
   local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
+  local cnet_input_planes = model.layers[#model.layers].filters
   local amp = nn.SpatialAdaptiveMaxPooling(kw, kh):cuda()
   
   local function cleanAnchors(examples, outputs)
@@ -111,7 +115,7 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
           
           -- pass through adaptive max pooling operation
           local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[5])
-          local po = amp:forward(pi):view(kh * kw * 300)
+          local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
           table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
         end
         
@@ -131,7 +135,7 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
           
           -- pass through adaptive max pooling operation
           local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[5])
-          local po = amp:forward(pi):view(kh * kw * 300)
+          local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
           table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
         end
         
@@ -140,7 +144,7 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
         
         -- create cnet input batch
         if #roi_pool_state > 0 then
-          local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * 300)
+          local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
           local cctarget = torch.CudaTensor(#roi_pool_state)
           local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
           
@@ -177,7 +181,7 @@ function create_objective(pnet, cnet, weights, gradient, batch_iterator)
           -- run backward pass over rois
           for i,x in ipairs(roi_pool_state) do
             amp.indices = x.indices
-            delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(300, kh, kw)))
+            delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
           end
         end
         

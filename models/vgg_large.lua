@@ -1,4 +1,4 @@
-require 'model_utilities'
+require 'models.model_utilities'
 
 function vgg_large(cfg)
   -- layer here means a block of one or more convolution layers followed by a max-pooling layer
@@ -16,7 +16,12 @@ function vgg_large(cfg)
     { kW=7, n=256, input=4 }
   }
   
-  return create_model(cfg, layers, anchor_nets)
+  local class_layers =  {
+    { n=1024, dropout=0.5 },
+    { n=1024, dropout=0.5 },
+  }
+  
+  return create_model(cfg, layers, anchor_nets, class_layers)
 end
 
 return vgg_large

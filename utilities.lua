@@ -190,11 +190,13 @@ function find_target_size(orig_w, orig_h, target_smaller_side, max_pixel_size)
   if orig_h < orig_w then
     -- height is smaller than width, set h to target_size
     w = math.min(orig_w * target_smaller_side/orig_h, max_pixel_size)
-    h = orig_h * w/orig_w
+    h = math.floor(orig_h * w/orig_w + 0.5)
+    w = math.floor(w + 0.5)
   else
     -- width is smaller than height, set w to target_size
     h = math.min(orig_h * target_smaller_side/orig_w, max_pixel_size)
-    w = orig_w * h/orig_h
+    w = math.floor(orig_w * h/orig_h + 0.5)
+    h = math.floor(h + 0.5)
   end
   assert(w >= 1 and h >= 1)
   return w, h

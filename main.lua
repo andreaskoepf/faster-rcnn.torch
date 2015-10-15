@@ -7,57 +7,16 @@ require 'cunn'
 require 'nms'
 
 require 'utilities'
-require 'model'
 require 'Anchors'
 require 'BatchIterator'
-require 'Objective'
-require 'Detector'
-
+require 'objective'
+--require 'Detector'
 
 -- parameters
 
 local base_path = '/home/koepf/datasets/brickset_all/'
 local testset_path = '/home/koepf/datasets/realbricks/'
 
- local duplo_cfg = {
-  class_count = 16,  -- excluding background class
-  target_smaller_side = 450,
-  --scales = { 48, 96, 192, 384 },
-  scales = { 32, 64, 128, 256 },
-  max_pixel_size = 1000,
-  --normalization = { method = 'contrastive', width = 7 },
-  normalization = { method = 'none' },
-  augmentation = { vflip = 0.5, hflip = 0.5, random_scaling = 0.5, aspect_jitter = 0.2 },
-  color_space = 'yuv',
-  roi_pooling = { kw = 6, kh = 6 },
-  examples_base_path = '/home/koepf/datasets/brickset_all/',
-  background_base_path = '/home/koepf/datasets/background/',
-  batch_size = 256,
-  positive_threshold = 0.5, 
-  negative_threshold = 0.25,
-  best_match = true,
-  nearby_aversion = true
-}
-
- local imgnet_cfg = {
-  class_count = 200,  -- excluding background class
-  --target_smaller_side = 600,
-  --scales = { 64, 128, 256, 512 },
-  target_smaller_side = 480,
-  scales = { 48, 96, 192, 384 },
-  max_pixel_size = 1000,
-  normalization = { method = 'none' },
-  augmentation = { vflip = 0, hflip = 0, random_scaling = 0, aspect_jitter = 0 },
-  color_space = 'yuv',
-  roi_pooling = { kw = 6, kh = 6 },
-  examples_base_path = '',
-  background_base_path = '',
-  batch_size = 256,
-  positive_threshold = 0.6, 
-  negative_threshold = 0.3,
-  best_match = true,
-  nearby_aversion = true
-}
 
 -- command line options
 cmd = torch.CmdLine()
@@ -68,6 +27,10 @@ cmd:text('Training a convnet for region proposals')
 cmd:text()
 
 cmd:text('=== Training ===')
+cmd:option('-cfg', 'config/imagenet.lua', 'configuration file')
+cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix') 
+cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
+cmd:option('-restore', '', 'network snapshot file name to load')
 cmd:option('-lr', 1E-4, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
 cmd:option('-opti', 'rmsprop', 'Optimizer')
@@ -77,8 +40,13 @@ cmd:option('-threads', 8, 'number of threads')
 cmd:option('-gpuid', 0, 'device ID (CUDA), (use -1 for CPU)')
 cmd:option('-seed', 0, 'random seed (0 = no fixed seed)')
 
+print('Command line args:')
 local opt = cmd:parse(arg or {})
 print(opt)
+
+print('Options:')
+local cfg = dofile(opt.cfg)
+print(cfg)
 
 -- system configuration
 torch.setdefaulttensortype('torch.FloatTensor')
@@ -128,50 +96,32 @@ function graph_training(cfg, snapshot_prefix, training_data_filename, network_fi
       #training_data.class_names,
       #training_data.background_files))
   
---[[   
-  local cfg = {
-    class_count = #training_data.class_names,  -- excluding background class
-    target_smaller_side = 450,
-    scales = { 48, 96, 192, 384 },
-    --scales = { 32, 64, 128, 256 },
-    max_pixel_size = 1000,
-    normalization = { method = 'none' },
-    color_space = 'yuv',
-    roi_pooling = { kw = 6, kh = 6 },
-    examples_base_path = '/data/imagenet/ILSVRC2015/Data/DET/train',
-    --background_base_path = '',
-    batch_size = 256,
-    positive_threshold = 0.5, 
-    negative_threshold = 0.25,
-    best_match = true,
-    nearby_aversion = true
-  }]]
-  
   training_data.cfg = cfg  -- add cfg
   
   local training_stats = {}
   
   local stored
-  if network_filename then
+  if network_filename and #network_filename > 0 then
     stored = load_obj(network_filename)
     --opt = stored.options
     training_stats = stored.stats
   end
   
-  local pnet = create_proposal_net()
-  local cnet = create_classifaction_net(cfg.roi_pooling.kw, cfg.roi_pooling.kh, 300, cfg.class_count + 1)
-
-  pnet:cuda()
-  cnet:cuda()
+  -- create model
+  local model_factory = dofile(cfg.model)
+  local model = model_factory(cfg)
+  
+  model.cnet:cuda()
+  model.pnet:cuda()
   
   -- combine parameters from pnet and cnet into flat tensors
-  local weights, gradient = combine_and_flatten_parameters(pnet, cnet)
+  local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
   if stored then
     weights:copy(stored.weights)
   end
   
-  local batchIterator = BatchIterator.new(pnet, training_data)
-  local eval_objective_grad = create_objective(pnet, cnet, weights, gradient, batchIterator)
+  local batchIterator = BatchIterator.new(model, training_data)
+  local eval_objective_grad = create_objective(model, weights, gradient, batchIterator)
   
   local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
@@ -209,16 +159,11 @@ function evaluation_demo()
   
   -- create detector
   
-  
   -- run detector on images
   
-  
   -- draw bounding boxes and save image
-  
 end
 
-
 --graph_training(duplo_cfg, 'duplo', 'duplo.t7', 'av_036000.t7')
-graph_training(imgnet_cfg, 'imgnet', 'ILSVRC2015_DET.t7', 'imgnet_016000.t7')
- 
+graph_training(cfg, opt.name, opt.train, opt.restore)
 --graph_evaluate(duplo_cfg, 'duplo.t7', 'duplo_036000.t7', true, 17)

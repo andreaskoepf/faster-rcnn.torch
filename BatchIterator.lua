@@ -75,7 +75,7 @@ local function crop(img, rois, rect)
   )
 end
 
-function BatchIterator:__init(pnet, training_data)
+function BatchIterator:__init(model, training_data)
   local cfg = training_data.cfg
   
   -- bounding box data (defined in pixels on original image)
@@ -88,7 +88,7 @@ function BatchIterator:__init(pnet, training_data)
     self.normalization = nn.Identity()
   end
   
-  self.anchors = Anchors.new(pnet, cfg.scales)
+  self.anchors = Anchors.new(model.pnet, cfg.scales)
   
   -- index tensors define evaluation order
   self.training = { order = torch.IntTensor(), list = training_data.training_set }
@@ -106,24 +106,27 @@ function BatchIterator:processImage(img, rois)
   local img_size = img:size()
   local tw, th = find_target_size(img_size[3], img_size[2], cfg.target_smaller_side, cfg.max_pixel_size)
   
+  local scale_X, scale_Y = tw / img_size[3], th / img_size[2]
+
   -- random scaling
   if aug.random_scaling and aug.random_scaling > 0 then
-    local scale_X = tw * (math.random() - 0.5) * aug.random_scaling / img_size[3] 
-    local scale_Y = scale_X + (math.random() - 0.5) * aug.aspect_jitter
-    img, rois = scale(img, rois, scale_X, scale_Y)
+    scale_X = tw * (math.random() - 0.5) * aug.random_scaling / img_size[3] 
+    scale_Y = scale_X + (math.random() - 0.5) * aug.aspect_jitter
+  end
   
-    -- crop image to final size if we upsampled at least one dimension
-    img_size = img:size()
-    if img_size[3] > tw or img_size[2] > th then
-      tw, th = math.min(tw, img_size[3]), math.min(th, img_size[2])
-      local crop_rect = Rect.fromXYWidthHeight(
-        math.floor(math.random() * img_size[3]-tw), 
-        math.floor(math.random() * img_size[2]-th), 
-        tw, 
-        th
-      )
-      img, rois = crop(img, rois, crop_rect)
-    end
+  img, rois = scale(img, rois, scale_X, scale_Y)
+  
+  -- crop image to final size if we upsampled at least one dimension
+  img_size = img:size()
+  if img_size[3] > tw or img_size[2] > th then
+    tw, th = math.min(tw, img_size[3]), math.min(th, img_size[2])
+    local crop_rect = Rect.fromXYWidthHeight(
+      math.floor(math.random() * (img_size[3]-tw)), 
+      math.floor(math.random() * (img_size[2]-th)), 
+      tw, 
+      th
+    )
+    img, rois = crop(img, rois, crop_rect)
   end
   
   -- horizontal flip operation
@@ -169,7 +172,6 @@ function BatchIterator:nextTraining(count)
       return 0
     end 
     
-    print(fn)
     local img, rois = self:processImage(img, rois)
     img_size = img:size()        -- get final size
     if img_size[2] < 128 or img_size[3] < 128 then
@@ -208,13 +210,13 @@ function BatchIterator:nextTraining(count)
     end
     
     -- debug boxes
-    if #positive == 0 then
+    if false then
       local dimg = image.yuv2rgb(img)
       local red = torch.Tensor({1,0,0})
       local white = torch.Tensor({1,1,1})
       
       for i=1,#negative do
-      --  draw_rectangle(dimg, negative[i][1], red)
+        draw_rectangle(dimg, negative[i][1], red)
       end
       local green = torch.Tensor({0,1,0})
       for i=1,#positive do
