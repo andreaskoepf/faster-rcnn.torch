@@ -196,7 +196,7 @@ function find_target_size(orig_w, orig_h, target_smaller_side, max_pixel_size)
     h = math.min(orig_h * target_smaller_side/orig_w, max_pixel_size)
     w = orig_w * h/orig_h
   end
-  assert(w > 0 and h > 0)
+  assert(w >= 1 and h >= 1)
   return w, h
 end
 

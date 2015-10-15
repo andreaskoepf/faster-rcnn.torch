@@ -1,14 +1,12 @@
-require 'nngraph'
+require 'model_utilities'
 
-
-
-function create_large_model(cfg)
+function vgg_small(cfg)
   -- layer here means a block of one or more convolution layers followed by a max-pooling layer
   local layers = { 
-    { filters=128, kW=3, kH=3, padW=1, padH=1, dropout=0.0, conv_steps=1 },
+    { filters= 64, kW=5, kH=5, padW=2, padH=2, dropout=0.0, conv_steps=1 },
+    { filters=128, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 },
     { filters=256, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 },
-    { filters=512, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 },
-    { filters=512, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 }
+    { filters=256, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 }
   }
   
   local anchor_nets = {
@@ -20,3 +18,5 @@ function create_large_model(cfg)
   
   return create_model(cfg, layers, anchor_nets)
 end
+
+return vgg_small

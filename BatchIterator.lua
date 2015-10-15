@@ -49,7 +49,7 @@ end
 local function scale(img, rois, scaleX, scaleY)
   scaleY = scaleY or scaleX
   return transform_example(img, rois, 
-    function(img, w, h) return image.scale(img, w * scaleX, h * scaleY) end,
+    function(img, w, h) return image.scale(img, math.max(1, w * scaleX), math.max(1, h * scaleY)) end,
     function(r, w, h) return r:scale(scaleX, scaleY) end
   )
 end
@@ -100,34 +100,44 @@ end
   
 function BatchIterator:processImage(img, rois)
   local cfg = self.cfg
+  local aug = cfg.augmentation
   
   -- determine optimal resize
   local img_size = img:size()
   local tw, th = find_target_size(img_size[3], img_size[2], cfg.target_smaller_side, cfg.max_pixel_size)
   
   -- random scaling
-  local scale_X = tw / img_size[3] + math.random() * 0.5 - 0.25  -- +/- 25% of 'optimal size'
-  local scale_Y = scale_X + math.random() * 0.1 - 0.05    -- 5% jitter
-  img, rois = scale(img, rois, scale_X, scale_Y)
+  if aug.random_scaling and aug.random_scaling > 0 then
+    local scale_X = tw * (math.random() - 0.5) * aug.random_scaling / img_size[3] 
+    local scale_Y = scale_X + (math.random() - 0.5) * aug.aspect_jitter
+    img, rois = scale(img, rois, scale_X, scale_Y)
   
-  -- crop image to final size if necesssary
-  img_size = img:size()
-  if img_size[3] > tw or img_size[2] > th then
-    tw, th = math.min(tw, img_size[3]), math.min(th, img_size[2])
-    local crop_rect = Rect.fromXYWidthHeight(
-      math.floor(math.random() * (img_size[3]-tw)), math.floor(math.random() * (img_size[2]-th)), 
-      tw, th
-    )
-    img, rois = crop(img, rois, crop_rect)
+    -- crop image to final size if we upsampled at least one dimension
+    img_size = img:size()
+    if img_size[3] > tw or img_size[2] > th then
+      tw, th = math.min(tw, img_size[3]), math.min(th, img_size[2])
+      local crop_rect = Rect.fromXYWidthHeight(
+        math.floor(math.random() * img_size[3]-tw), 
+        math.floor(math.random() * img_size[2]-th), 
+        tw, 
+        th
+      )
+      img, rois = crop(img, rois, crop_rect)
+    end
   end
   
-  -- perform random flip operatons, in 10% of cases hflip+vflip
-  local r = math.random() 
-  if r > 0.5 or r > 0.9 then
-    img, rois = hflip(img, rois)
+  -- horizontal flip operation
+  if aug.hflip and aug.hflip > 0 then 
+    if math.random() < aug.hflip then
+      img, rois = hflip(img, rois)
+    end
   end
-  if r > 0.7 then
-    img, rois = vflip(img, rois)
+  
+  -- vertical flip operation
+  if aug.vflip and aug.vflip > 0 then
+    if math.random() < aug.vflip then
+      img, rois = vflip(img, rois)
+    end
   end
   
   img[1] = self.normalization:forward(img[{{1}}])   -- normalize luminance channel img
@@ -154,11 +164,12 @@ function BatchIterator:nextTraining(count)
     end
 
     local img_size = img:size()
-    if img_size[1] ~= 3 then
-      print(string.format("Warning: Skipping image '%s'. Unexpected channel count: %d", fn, img_size[1]))
+    if img:nDimension() ~= 3 or img_size[1] ~= 3 then
+      print(string.format("Warning: Skipping image '%s'. Unexpected channel count: %d (dim: %d)", fn, img_size[1], img:nDimension()))
       return 0
     end 
     
+    print(fn)
     local img, rois = self:processImage(img, rois)
     img_size = img:size()        -- get final size
     if img_size[2] < 128 or img_size[3] < 128 then
