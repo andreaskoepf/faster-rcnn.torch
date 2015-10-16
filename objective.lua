@@ -213,7 +213,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats)
       table.insert(stats.dcls, dcls)
       table.insert(stats.dreg, dreg)
       
-      local loss = pcls + reg_loss
+      local loss = pcls + preg
       return loss, gradient
     end
     
