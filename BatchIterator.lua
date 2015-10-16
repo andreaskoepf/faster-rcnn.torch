@@ -76,7 +76,7 @@ local function crop(img, rois, rect)
 end
 
 function BatchIterator:__init(model, training_data)
-  local cfg = training_data.cfg
+  local cfg = model.cfg
   
   -- bounding box data (defined in pixels on original image)
   self.ground_truth = training_data.ground_truth 
@@ -255,13 +255,48 @@ function BatchIterator:nextTraining(count)
   end
   
   while count > 0 do
-    count = count - try_add_next(batch, fn, rois)
+    count = count - try_add_next()
   end
   
   return batch
 end
 
-
 function BatchIterator:nextValidation(count)
-  -- TODO
+  local cfg = self.cfg
+  local batch = {}
+  count = count or 1
+  
+  -- use local function to allow early exits in case of to image load failures
+  while count > 0 do
+    local fn = next_entry(self.validation)
+  
+    -- load image, wrap with pcall since image net contains invalid non-jpeg files
+    local status, img = pcall(function () return load_image(fn, cfg.color_space, cfg.examples_base_path) end)
+    if not status then
+      -- pcall failed, corrupted image file?
+      print(string.format("Invalid image '%s': %s", fn, img))
+      goto continue
+    end
+
+    local img_size = img:size()
+    if img:nDimension() ~= 3 or img_size[1] ~= 3 then
+      print(string.format("Warning: Skipping image '%s'. Unexpected channel count: %d (dim: %d)", fn, img_size[1], img:nDimension()))
+      goto continue
+    end 
+    
+    local rois = deep_copy(self.ground_truth[fn].rois)   -- copy RoIs ground-truth data (will be manipulated, e.g. scaled)
+    local img, rois = self:processImage(img, rois)
+    img_size = img:size()        -- get final size
+    if img_size[2] < 128 or img_size[3] < 128 then
+      print(string.format("Warning: Skipping image '%s'. Invalid size after process: (%dx%d)", fn, img_size[3], img_size[2]))  
+      goto continue
+    end
+      
+    table.insert(batch, { img = img, rois = rois })
+  
+    count = count - 1
+    ::continue::
+  end
+  
+  return batch  
 end

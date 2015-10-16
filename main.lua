@@ -11,7 +11,7 @@ require 'utilities'
 require 'Anchors'
 require 'BatchIterator'
 require 'objective'
---require 'Detector'
+require 'Detector'
 
 
 -- command line options
@@ -77,6 +77,28 @@ function plot_training_progress(prefix, stats)
   gnuplot.plotflush()
 end
 
+function load_model(cfg, model_path, network_filename, cuda)
+
+  -- get configuration & model
+  local model_factory = dofile(model_path)
+  local model = model_factory(cfg)
+  
+  -- combine parameters from pnet and cnet into flat tensors
+  local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
+  local training_stats
+  if network_filename and #network_filename > 0 then
+    local stored = load_obj(network_filename)
+    training_stats = stored.stats
+    weights:copy(stored.weights)
+  end
+  
+  if cuda then
+    model.cnet:cuda()
+    model.pnet:cuda()
+  end
+  
+  return model, training_stats
+end
 
 function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
   print('Reading training data file \'' .. training_data_filename .. '\'.')
@@ -88,27 +110,10 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       #training_data.class_names,
       #training_data.background_files))
   
-  training_data.cfg = cfg  -- add cfg
-  
-  local training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-  
-  local stored
-  if network_filename and #network_filename > 0 then
-    stored = load_obj(network_filename)
-    training_stats = stored.stats
-  end
-  
-  -- create model
-  local model_factory = dofile(model_path)
-  local model = model_factory(cfg)
-  
-  model.cnet:cuda()
-  model.pnet:cuda()
-  
-  -- combine parameters from pnet and cnet into flat tensors
-  local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
-  if stored then
-    weights:copy(stored.weights)
+  -- create/load model
+  local model, training_stats = load_model(cfg, model_path, network_filename, true)
+  if not training_stats then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
   end
   
   local batchIterator = BatchIterator.new(model, training_data)
@@ -148,12 +153,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
 end
 
 
-graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
-
-
--- TODO: remove
-local base_path = '/home/koepf/datasets/brickset_all/'
-local testset_path = '/home/koepf/datasets/realbricks/'
 
 function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_space)
   local img = image.load(path.join(base_path, fn), 3, 'float')
@@ -183,14 +182,41 @@ function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_spa
   return img, dim
 end
 
-function evaluation_demo()
-  -- get configuration & model
+function evaluation_demo(cfg, model_path, training_data_filename, network_filename)
+  -- load trainnig data
+  local training_data = load_obj(training_data_filename)
+  local image_file_names = training_data.validation_set
+  
+  -- load model
+  local model = load_model(cfg, model_path, network_filename, true)
+  local batch_iterator = BatchIterator.new(model, training_data)
+    
+  local red = torch.Tensor({1,0,0})
+  local green = torch.Tensor({0,1,0})
+  local blue = torch.Tensor({0,0,1})
+  local white = torch.Tensor({1,1,1})
+  local colors = { red, green, blue, white }
   
   -- create detector
+  local d = Detector(model)
+    
+  for i=1,10 do
   
-  -- run detector on images
+    -- pick random image
+    local b = batch_iterator:nextValidation(1)[1]
+    local img = b.img
+    
+    local matches = d:detect(img)
+      
+    -- draw bounding boxes and save image
+    for i,m in ipairs(matches) do
+      draw_rectangle(img, m.r2, green)
+    end
+    
+    image.saveJPG(string.format('output%d.jpg', i), img)
+  end
   
-  -- draw bounding boxes and save image
 end
 
---graph_evaluate(duplo_cfg, 'duplo.t7', 'duplo_036000.t7', true, 17)
+graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+--evaluation_demo(cfg, opt.model, opt.train, 'imgnet_023000.t7')
