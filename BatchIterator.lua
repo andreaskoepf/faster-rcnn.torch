@@ -246,7 +246,7 @@ function BatchIterator:nextTraining(count)
         local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
         table.insert(batch, { img = img, positive = {}, negative = negative })
         count = count - #negative
-        -- print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
+        print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
       end
     else
       -- pcall failed, corrupted image file?

@@ -12,7 +12,6 @@ function Detector:__init(model)
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
   self.localizer = Localizer.new(model.pnet.outnode.children[5])
   self.lsm = nn.LogSoftMax():cuda()
-  self.normalization = nn.SpatialContrastiveNormalization(1, image.gaussian1D(7))
   self.amp = nn.SpatialAdaptiveMaxPooling(cfg.roi_pooling.kw, cfg.roi_pooling.kh):cuda()  
 end
 
@@ -64,7 +63,7 @@ function Detector:detect(input)
       end
     end      
   end
-  
+
   local winners = {}
   
   if #matches > 0 then
@@ -79,9 +78,10 @@ function Detector:detect(input)
     
     local iou_threshold = 0.5
     local pick = nms(bb, iou_threshold, score)
+    --local pick = nms(bb, iou_threshold, 'area')
     local candidates = {}
     pick:apply(function (x) table.insert(candidates, matches[x]) end )
-
+    
     print(string.format('candidates: %d', #candidates))
     
     -- REGION CLASSIFICATION 
@@ -110,7 +110,7 @@ function Detector:detect(input)
       x.class = c[1]
       x.confidence = p[1]
       
-      if x.class ~= bgclass then --and math.exp(x.confidence) > 0.01 then
+      if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
         if not yclass[x.class] then
           yclass[x.class] = {}
         end

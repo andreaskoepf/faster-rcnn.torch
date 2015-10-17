@@ -19,7 +19,7 @@ function create_proposal_net(layers, anchor_nets)
       ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout)
       nInputPlane = nOutputPlane
     end
-    container:add(nn.SpatialMaxPooling(2, 2, 2, 2):ceil())
+    container:add(nn.SpatialMaxPooling(2, 2, 2, 2)) --:ceil())
     return container
   end  
   

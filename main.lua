@@ -83,6 +83,11 @@ function load_model(cfg, model_path, network_filename, cuda)
   local model_factory = dofile(model_path)
   local model = model_factory(cfg)
   
+  if cuda then
+    model.cnet:cuda()
+    model.pnet:cuda()
+  end
+  
   -- combine parameters from pnet and cnet into flat tensors
   local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
   local training_stats
@@ -91,13 +96,8 @@ function load_model(cfg, model_path, network_filename, cuda)
     training_stats = stored.stats
     weights:copy(stored.weights)
   end
-  
-  if cuda then
-    model.cnet:cuda()
-    model.pnet:cuda()
-  end
-  
-  return model, training_stats
+
+  return model, weights, gradient, training_stats
 end
 
 function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
@@ -111,13 +111,13 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       #training_data.background_files))
   
   -- create/load model
-  local model, training_stats = load_model(cfg, model_path, network_filename, true)
+  local model, weights, gradient, training_stats = load_model(cfg, model_path, network_filename, true)
   if not training_stats then
     training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
   end
   
-  local batchIterator = BatchIterator.new(model, training_data)
-  local eval_objective_grad = create_objective(model, weights, gradient, batchIterator, training_stats)
+  local batch_iterator = BatchIterator.new(model, training_data)
+  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats)
   
   local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
@@ -152,8 +152,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   -- compute positive anchors, add anchors to ground-truth file
 end
 
-
-
 function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_space)
   local img = image.load(path.join(base_path, fn), 3, 'float')
   local dim = img:size()
@@ -185,7 +183,6 @@ end
 function evaluation_demo(cfg, model_path, training_data_filename, network_filename)
   -- load trainnig data
   local training_data = load_obj(training_data_filename)
-  local image_file_names = training_data.validation_set
   
   -- load model
   local model = load_model(cfg, model_path, network_filename, true)
@@ -200,17 +197,17 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
   -- create detector
   local d = Detector(model)
     
-  for i=1,10 do
+  for i=1,50 do
   
-    -- pick random image
+    -- pick random validation image
     local b = batch_iterator:nextValidation(1)[1]
     local img = b.img
     
     local matches = d:detect(img)
-      
+    img = image.yuv2rgb(img)
     -- draw bounding boxes and save image
     for i,m in ipairs(matches) do
-      draw_rectangle(img, m.r2, green)
+      draw_rectangle(img, m.r, green)
     end
     
     image.saveJPG(string.format('output%d.jpg', i), img)
@@ -218,5 +215,6 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
   
 end
 
-graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
---evaluation_demo(cfg, opt.model, opt.train, 'imgnet_023000.t7')
+--graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+evaluation_demo(cfg, opt.model, opt.train, opt.restore)
+
