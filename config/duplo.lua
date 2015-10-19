@@ -3,7 +3,7 @@
   target_smaller_side = 450,
   scales = { 32, 64, 128, 256 },
   max_pixel_size = 1000,
-  normalization = { method = 'contrastive', width = 7 },
+  normalization = { method = 'contrastive', width = 7, centering = true, scaling = true },
   augmentation = { vflip = 0.5, hflip = 0.5, random_scaling = 0.0, aspect_jitter = 0.0 },
   color_space = 'yuv',
   roi_pooling = { kw = 6, kh = 6 },

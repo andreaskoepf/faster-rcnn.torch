@@ -215,6 +215,6 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
   
 end
 
---graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
-evaluation_demo(cfg, opt.model, opt.train, opt.restore)
+graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+--evaluation_demo(cfg, opt.model, opt.train, opt.restore)
 

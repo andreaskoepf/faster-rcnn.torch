@@ -143,6 +143,21 @@ function BatchIterator:processImage(img, rois)
     end
   end
   
+  if cfg.normalization.centering then
+    for i = 1,3 do
+      img[i] = img[i]:add(-img[i]:mean())
+    end
+  end
+  
+  if cfg.normalization.scaling then
+  for i = 1,3 do
+      local s = img[i]:std()
+      if s > 1e-8 then
+        img[i] = img[i]:div(s)
+      end
+    end
+  end
+  
   img[1] = self.normalization:forward(img[{{1}}])   -- normalize luminance channel img
   
   return img, rois

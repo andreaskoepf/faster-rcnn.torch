@@ -8,7 +8,7 @@ function create_proposal_net(layers, anchor_nets)
     container:add(nn.SpatialConvolution(nInputPlane, nOutputPlane, kW,kH, 1,1, padW,padH))
     container:add(nn.PReLU())
     if dropout and dropout > 0 then
-      container:add(nn.Dropout(dropout))
+      container:add(nn.SpatialDropout(dropout))
     end
     return container
   end
@@ -80,6 +80,9 @@ function create_classification_net(inputs, class_count, class_layers)
   local prev_input_count = inputs
   for i,l in ipairs(class_layers) do
     net:add(nn.Linear(prev_input_count, l.n))
+    if l.batch_norm then
+      net:add(nn.BatchNormalization(l.n))
+    end
     net:add(nn.PReLU())
     if l.dropout and l.dropout > 0 then
       net:add(nn.Dropout(l.dropout))
