@@ -14,7 +14,7 @@ function Anchors:__init(proposal_net, scales)
   -- generate vertical and horizontal min-max anchor lookup tables
   local width, height = 200, 200  -- max size of feature layers
   
-  -- indicies: scale, aspect-ratio, i, min/max 
+  -- indicies: scale, aspect-ratio, i, min/max
   self.w = torch.Tensor(#scales, 3, width, 2)
   self.h = torch.Tensor(#scales, 3, height, 2)
   

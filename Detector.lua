@@ -1,7 +1,6 @@
 require 'cunn'
 require 'image'
 require 'nms'
-require 'Rect'
 require 'Anchors'
 
 local Detector = torch.class('Detector')
@@ -12,7 +11,7 @@ function Detector:__init(model)
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
   self.localizer = Localizer.new(model.pnet.outnode.children[5])
   self.lsm = nn.LogSoftMax():cuda()
-  self.amp = nn.SpatialAdaptiveMaxPooling(cfg.roi_pooling.kw, cfg.roi_pooling.kh):cuda()  
+  self.amp = nn.SpatialAdaptiveMaxPooling(cfg.roi_pooling.kw, cfg.roi_pooling.kh):cuda()
 end
 
 function Detector:detect(input)
@@ -32,7 +31,7 @@ function Detector:detect(input)
   pnet:evaluate()
   input = input:cuda()
   local outputs = pnet:forward(input)
-  
+
    -- analyse network output for non-background classification
   local matches = {}
 
@@ -48,21 +47,24 @@ function Detector:detect(input)
           local ofs = (a-1) * 6
           local cls_out = c[{{ofs + 1, ofs + 2}}] 
           local reg_out = c[{{ofs + 3, ofs + 6}}]
-          
-          -- regression
-          local a = self.anchors:get(i,a,y,x)
-          local r = Anchors.anchorToInput(a, reg_out)
-          
+                    
           -- classification
           local c = lsm:forward(cls_out)
-          if math.exp(c[1]) > 0.9 and r:overlaps(input_rect) then
-            table.insert(matches, { p=c[1], a=a, r=r, l=i })
+          --if c[1] > c[2] then
+          if math.exp(c[1]) > 0.95 then
+            -- regression
+            local a = self.anchors:get(i,a,y,x)
+            local r = Anchors.anchorToInput(a, reg_out)
+            if r:overlaps(input_rect) then
+              table.insert(matches, { p=c[1], a=a, r=r, l=i })
+            end
           end
           
         end
       end
     end      
   end
+  
 
   local winners = {}
   
@@ -76,7 +78,7 @@ function Detector:detect(input)
       score[i] = matches[i].p
     end
     
-    local iou_threshold = 0.5
+    local iou_threshold = 0.25
     local pick = nms(bb, iou_threshold, score)
     --local pick = nms(bb, iou_threshold, 'area')
     local candidates = {}
@@ -109,7 +111,7 @@ function Detector:detect(input)
       
       x.class = c[1]
       x.confidence = p[1]
-      
+      print(x.class)
       if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
         if not yclass[x.class] then
           yclass[x.class] = {}

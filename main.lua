@@ -121,7 +121,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   
   local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
-  --local sgd_state = { learningRate = 0.000025, weightDecay = 1e-7, momentum = 0.9 }
+  local sgd_state = { learningRate = opt.lr, weightDecay = 0.0005, momentum = 0.9 }
   
   for i=1,50000 do
     if i % 5000 == 0 then
@@ -131,8 +131,8 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   
     local timer = torch.Timer()
     local _, loss = optim.rmsprop(eval_objective_grad, weights, rmsprop_state)
-    --local _, loss = optim.nag(optimization_target, weights, nag_state)
-    --local _, loss = optim.sgd(optimization_target, weights, sgd_state)
+    --local _, loss = optim.nag(eval_objective_grad, weights, nag_state)
+    --local _, loss = optim.sgd(eval_objective_grad, weights, sgd_state)
     
     local time = timer:time().real
 

@@ -7,7 +7,7 @@ function create_proposal_net(layers, anchor_nets)
   local function ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout)
     container:add(nn.SpatialConvolution(nInputPlane, nOutputPlane, kW,kH, 1,1, padW,padH))
     container:add(nn.PReLU())
-    if dropout then
+    if dropout and dropout > 0 then
       container:add(nn.Dropout(dropout))
     end
     return container
@@ -18,16 +18,17 @@ function create_proposal_net(layers, anchor_nets)
     for i=1,conv_steps do
       ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout)
       nInputPlane = nOutputPlane
+      dropout = nil -- only one dropout layer per conv-pool block 
     end
-    container:add(nn.SpatialMaxPooling(2, 2, 2, 2)) --:ceil())
+    container:add(nn.SpatialMaxPooling(2, 2, 2, 2):ceil())
     return container
   end  
   
-  -- creates anchor network which reduces to a 256 dimensional vector and 
-  -- then to anchors outputs for 3 aspect ratios 
-  local function AnchorNetwork(inputs, n, kernelWidth)
+  -- creates an anchor network which reduces the input first to 256 dimensions 
+  -- and then further to the anchor outputs for 3 aspect ratios 
+  local function AnchorNetwork(nInputPlane, n, kernelWidth)
     local net = nn.Sequential()
-    net:add(nn.SpatialConvolution(inputs, n, kernelWidth,kernelWidth, 1,1))
+    net:add(nn.SpatialConvolution(nInputPlane, n, kernelWidth,kernelWidth, 1,1))
     net:add(nn.PReLU())
     net:add(nn.SpatialConvolution(n, 3 * (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
     return net
@@ -76,14 +77,14 @@ function create_classification_net(inputs, class_count, class_layers)
   -- create classifiaction network
   local net = nn.Sequential()
   
-  local prev_inputs = inputs
+  local prev_input_count = inputs
   for i,l in ipairs(class_layers) do
-    net:add(nn.Linear(prev_inputs, l.n))
+    net:add(nn.Linear(prev_input_count, l.n))
     net:add(nn.PReLU())
     if l.dropout and l.dropout > 0 then
       net:add(nn.Dropout(l.dropout))
     end
-    prev_inputs = l.n
+    prev_input_count = l.n
   end
   
   local input = nn.Identity()()
@@ -92,11 +93,11 @@ function create_classification_net(inputs, class_count, class_layers)
   -- now the network splits into regression and classification branches
   
   -- regression output
-  local rout = nn.Linear(prev_inputs, 4)(node)
+  local rout = nn.Linear(prev_input_count, 4)(node)
   
   -- classification output
   local cnet = nn.Sequential()
-  cnet:add(nn.Linear(prev_inputs, class_count))
+  cnet:add(nn.Linear(prev_input_count, class_count))
   cnet:add(nn.LogSoftMax())
   local cout = cnet(node)
   
@@ -120,13 +121,13 @@ function create_classification_net(inputs, class_count, class_layers)
 end
 
 function create_model(cfg, layers, anchor_nets, class_layers)
-  local cnet_inputs = cfg.roi_pooling.kh * cfg.roi_pooling.kw * layers[#layers].filters
+  local cnet_ninputs = cfg.roi_pooling.kh * cfg.roi_pooling.kw * layers[#layers].filters
   local model = 
   {
     cfg = cfg,
     layers = layers,
     pnet = create_proposal_net(layers, anchor_nets),
-    cnet = create_classification_net(cnet_inputs, cfg.class_count + 1, class_layers)
+    cnet = create_classification_net(cnet_ninputs, cfg.class_count + 1, class_layers)
   }
   return model
 end
