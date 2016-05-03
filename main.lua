@@ -157,6 +157,7 @@ end
 
 function evaluation_demo(cfg, model_path, training_data_filename, network_filename)
   -- load trainnig data
+
   local training_data = load_obj(training_data_filename)
   
   -- load model
@@ -193,6 +194,6 @@ end
 if opt.mode == 'train' then 
   graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
 else
-  evaluation_demo(cfg, opt.model, opt.train, opt.restore)
+  --evaluation_demo(cfg, opt.model, opt.train, opt.restore)
 end
 
