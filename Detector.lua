@@ -54,7 +54,7 @@ function Detector:detect(input)
           local c = lsm:forward(cls_out)
           --if c[1] > c[2] then
           local c_norm= m:forward(cls_out)
-          --if math.exp(c_norm[1]) > 0.99 then  -- only two classes (foreground and background)
+          --if math.exp(c[1]) > 0.9 then  -- only two classes (foreground and background)
 
           if c_norm[1] > 0.7 then  -- only two classes (foreground and background)
 
@@ -84,7 +84,7 @@ function Detector:detect(input)
       score[i] = matches[i].p
     end
 
-    local iou_threshold = 0.7 --FIXME =0.25
+    local iou_threshold = 0.25 --FIXME =0.25
     local pick = nms(bb, iou_threshold, score)
     --local pick = nms(bb, iou_threshold, 'area')
     local candidates = {}

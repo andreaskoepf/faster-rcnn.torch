@@ -30,7 +30,7 @@ cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
 cmd:option('-restore', '', 'network snapshot file name to load')
 cmd:option('-snapshot', 1000, 'snapshot interval')
 cmd:option('-plot', 100, 'plot training progress interval')
-cmd:option('-lr', 1E-5, 'learn rate')
+cmd:option('-lr', 1E-4, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
 cmd:option('-opti', 'rmsprop', 'Optimizer')
 cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training process ect)')
@@ -90,7 +90,7 @@ function plot_training_progress(prefix, stats)
   gnuplot.axis({ 0, #stats.pcls, 0, 10 })
   gnuplot.xlabel('iteration')
   gnuplot.ylabel('loss')
-  
+
   gnuplot.plotflush()
 end
 
@@ -136,24 +136,55 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   local batch_iterator = BatchIterator.new(model, training_data)
   local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
 
+
+  print '==> configuring optimizer'
+  local optimState, optimMethod
+  if opt.opti == 'CG' then
+    optimState = {
+      maxIter = 10000
+    }
+    optimMethod = optim.cg
+
+  elseif opt.opti == 'LBFGS' then
+    optimState = {
+      learningRate = opt.lr,
+      maxIter = 10000,
+      nCorrection = 10
+    }
+    optimMethod = optim.lbfgs
+
+  elseif opt.opti == 'sgd' then
+    optimState = {
+      learningRate = opt.lr,
+      weightDecay = 0.0,
+      momentum = 0.9,
+      learningRateDecay = 1e-7
+    }
+    optimMethod = optim.sgd
+
+  elseif opt.opti == 'rmsprop' then
+    optimState = {
+      learningRate = opt.lr,
+      alpha = opt.rms_decay
+    }
+    optimMethod = optim.rmsprop
+
+  else
+    error('unknown optimization method')
+  end
   local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
-  local sgd_state = { learningRate = opt.lr, weightDecay = 0.0005, momentum = 0.9 }
+  --local sgd_state = { learningRate = opt.lr, learningRateDecay= 1e-4,weightDecay = 0.0, momentum = 0.90 }
 
   for i=1,50000 do
     if i % 5000 == 0 then
-      opt.lr = opt.lr / 2
-      rmsprop_state.learningRate = opt.lr
-       
+      opt.lr = opt.lr - opt.lr/10
+      optimState.learningRate = opt.lr
+
     end
 
     local timer = torch.Timer()
-    --local _, loss = optim.rmsprop(eval_objective_grad, weights, rmsprop_state)
-    --local _, loss = optim.nag(eval_objective_grad, weights, nag_state)
-    local _, loss = optim.sgd(eval_objective_grad, weights, sgd_state)
-    --confusion:batchAdd(outputs, targets)
-    --confusion:updateValids()
-
+    local _, loss =optimMethod(eval_objective_grad, weights, optimState)
 
     local time = timer:time().real
 
@@ -168,16 +199,17 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       print(string.format('training pnet confusion: %s',tostring(confusion_pcls)))
       print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
       plot_training_progress(snapshot_prefix, training_stats)
-      evaluation( model, training_data,rmsprop_state,i)
-      
+      --evaluation( model, training_data,rmsprop_state,i)
+      evaluation( model, training_data,optimState,i)
+
       graph.dot(model.cnet.fg, 'cnet',string.format('%s/cnet_fg',opt.resultDir))
       graph.dot(model.cnet.bg, 'cnet',string.format('%s/cnet_bg',opt.resultDir))
       graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
       graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
-      
+
       confusion_pcls:zero()
       confusion_ccls:zero()
-      
+
     end
 
     if i%opt.snapshot == 0 then
@@ -276,9 +308,11 @@ function evaluation(model, training_data,optimState,epoch)
     <h4>optimState:</h4>
     <table>
     ]],save,epoch,base64im_p,base64im_d))
-    for k,v in pairs(optimState) do
-      if torch.type(v) == 'number' then
-        file:write('<tr><td>'..k..'</td><td>'..v..'</td></tr>\n')
+    if optimState then
+      for k,v in pairs(optimState) do
+        if torch.type(v) == 'number' then
+          file:write('<tr><td>'..k..'</td><td>'..v..'</td></tr>\n')
+        end
       end
     end
     file:write'<table>\n'
@@ -336,7 +370,7 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
     elseif color_space == 'hsv' then
       img = image.hsv2rgb(img)
     end
-    
+
     -- draw bounding boxes and save image
     for i,m in ipairs(matches) do
       draw_rectangle(img, m.r, green)

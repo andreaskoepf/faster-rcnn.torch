@@ -48,8 +48,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
       weights:copy(w)
     end
     gradient:zero()
-    
-    local lambda = 10
+
+
     -- statistics for proposal stage
     local cls_loss, reg_loss = 0, 0
     local cls_count, reg_count = 0, 0
@@ -120,9 +120,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         clsOutput[{1,2}]=v[2]
         pnet_confusion:batchAdd(clsOutput, target)
         -- box regression
+        local lambda = 1--10
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
-        local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
         reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)* lambda-- * 10
         local dr = smoothL1:backward(reg_out, reg_target)* lambda --* 10
         d[{{3,6}}]:add(dr)
@@ -186,6 +186,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         local coutputs = cnet:forward(cinput)
 
         -- compute classification and regression error and run backward pass
+        local lambda = 10
         local crout = coutputs[1]
         crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
         creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
@@ -198,9 +199,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         ccls_loss = ccls_loss + loss
         local ccdelta = cnll:backward(ccout, cctarget)
 
-       --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
+        --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
         local ccdelta = softmax:backward(ccout, cctarget)--]]
-        
+
         local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
 
         cnet_confusion:batchAdd(ccout, cctarget)
