@@ -6,7 +6,7 @@ function create_proposal_net(layers, anchor_nets)
   -- VGG style 3x3 convolution building block
   local function ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout)
     container:add(nn.SpatialConvolution(nInputPlane, nOutputPlane, kW,kH, 1,1, padW,padH))
-    container:add(nn.PReLU())
+    container:add(nn.ReLU())
     if dropout and dropout > 0 then
       container:add(nn.SpatialDropout(dropout))
     end
@@ -29,7 +29,7 @@ function create_proposal_net(layers, anchor_nets)
   local function AnchorNetwork(nInputPlane, n, kernelWidth)
     local net = nn.Sequential()
     net:add(nn.SpatialConvolution(nInputPlane, n, kernelWidth,kernelWidth, 1,1))
-    net:add(nn.PReLU())
+    net:add(nn.ReLU())
     net:add(nn.SpatialConvolution(n, 3 * (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
     return net
   end
@@ -83,7 +83,7 @@ function create_classification_net(inputs, class_count, class_layers)
     if l.batch_norm then
       net:add(nn.BatchNormalization(l.n))
     end
-    net:add(nn.PReLU())
+    net:add(nn.ReLU())
     if l.dropout and l.dropout > 0 then
       net:add(nn.Dropout(l.dropout))
     end

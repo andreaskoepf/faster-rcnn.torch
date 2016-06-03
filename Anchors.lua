@@ -105,8 +105,9 @@ function Anchors:findRangesXY(rect, clip_rect)
   
   local ranges = {}
   local w,h = self.w, self.h
-  for i=1,4 do    -- scales
-    for j=1,3 do    -- aspect ratios
+  local s = w:size()
+  for i=1,1 do    -- scales --FIXME why not 4 
+    for j=1,3 do    -- aspect ratios1
     
       local clx, cly, cux, cuy  -- lower and upper bounds of clipping rect (indices)
       if clip_rect then
@@ -160,7 +161,7 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
     for j,r in ipairs(ranges) do
       -- generate all candidate anchors from xs,ys ranges list
       for y=1,r.ys:size()[1] do
-        local minY, maxY = r.ys[{y, 1}], r.ys[{y, 2}]        
+        local minY, maxY = r.ys[{y, 1}], r.ys[{y, 2}]
         for x=1,r.xs:size()[1] do
           -- create rect, add layer & aspect info
           local anchor_rect = Rect.new(r.xs[{x, 1}], minY, r.xs[{x, 2}], maxY)
@@ -172,10 +173,11 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
           if v > pos_threshold then
             table.insert(matches, { anchor_rect, roi })
             best_set = nil
-          elseif v > neg_threshold and best_set and v >= best_iou then
-            if v - 0.025 > best_iou then
-              best_set = {}
-            end
+          --elseif v > neg_threshold and best_set and v >= best_iou then
+          elseif best_set and v >= best_iou then
+            --if v - 0.025 > best_iou then
+            best_set = {}
+            --end
             table.insert(best_set, anchor_rect)
             best_iou = v
           end
@@ -250,3 +252,67 @@ function Anchors.anchorToInput(anchor, t)
     math.exp(t[4]) * anchor:height() 
   )
 end
+
+
+
+
+
+
+
+
+
+
+
+
+--[[
+function Anchors.inputToAnchor(anchor, rect)
+
+    local ex_widths = anchor:width()+1
+    local ex_heights = anchor:heights()+1
+    local ex_ctr_x = anchor.minX + 0.5 * (ex_widths - 1)
+    local ex_ctr_y = anchor.minY + 0.5 * (ex_heights - 1)
+    
+    local gt_widths = rect:width()+1
+    local gt_heights = rect:height()+1
+    local gt_ctr_x = rect.minX + 0.5 * (gt_widths - 1)
+    local gt_ctr_y = rect.minY + 0.5 * (gt_heights - 1)
+    
+    local x = (gt_ctr_x - ex_ctr_x) / (ex_widths+1e-16)
+    local y = (gt_ctr_y - ex_ctr_y) / (ex_heights+1e-16)
+    local w = math.log(gt_widths / ex_widths)
+    local h = math.log(gt_heights / ex_heights)
+  return torch.FloatTensor({x, y, w, h})
+end
+
+function Anchors.anchorToInput(anchor, t)
+
+    
+    src_w = anchor:width()+1
+    src_h = anchor:width()+1
+    src_ctr_x = double(boxes(:, 1) + 0.5*(src_w-1));
+    src_ctr_y = double(boxes(:, 2) + 0.5*(src_h-1));
+    
+    dst_ctr_x = double(box_deltas(:, 1:4:end));
+    dst_ctr_y = double(box_deltas(:, 2:4:end));
+    dst_scl_x = double(box_deltas(:, 3:4:end));
+    dst_scl_y = double(box_deltas(:, 4:4:end));
+
+    pred_ctr_x = bsxfun(@plus, bsxfun(@times, dst_ctr_x, src_w), src_ctr_x);
+    pred_ctr_y = bsxfun(@plus, bsxfun(@times, dst_ctr_y, src_h), src_ctr_y);
+    pred_w = bsxfun(@times, exp(dst_scl_x), src_w);
+    pred_h = bsxfun(@times, exp(dst_scl_y), src_h);
+    pred_boxes = zeros(size(box_deltas), 'single');
+    pred_boxes(:, 1:4:end) = pred_ctr_x - 0.5*(pred_w-1);
+    pred_boxes(:, 2:4:end) = pred_ctr_y - 0.5*(pred_h-1);
+    pred_boxes(:, 3:4:end) = pred_ctr_x + 0.5*(pred_w-1);
+    pred_boxes(:, 4:4:end) = pred_ctr_y + 0.5*(pred_h-1); 
+
+
+  return Rect.fromXYWidthHeight(
+    t[1] * anchor:width() + anchor.minX,
+    t[2] * anchor:height() + anchor.minY,
+    math.exp(t[3]) * anchor:width(),
+    math.exp(t[4]) * anchor:height() 
+  )
+end
+--]]

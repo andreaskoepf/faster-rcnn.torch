@@ -1,17 +1,17 @@
  local duplo_cfg = {
   class_count = 16,  -- excluding background class
-  target_smaller_side = 450,
-  scales = { 32, 64, 128, 256 },
+  target_smaller_side = 224,
+  scales = { 16,32, 64}, 
   max_pixel_size = 1000,
-  normalization = { method = 'contrastive', width = 7, centering = true, scaling = true },
+  normalization = { method = nil, width = 7, centering = false, scaling = false },
   augmentation = { vflip = 0.5, hflip = 0.5, random_scaling = 0.0, aspect_jitter = 0.0 },
-  color_space = 'yuv',
+  color_space = 'rgb',
   roi_pooling = { kw = 6, kh = 6 },
-  examples_base_path = '/home/koepf/datasets/brickset_all/',
-  background_base_path = '/home/koepf/datasets/background/',
+  examples_base_path = '/data/brickset_all/',
+  background_base_path = nil,
   batch_size = 256,
-  positive_threshold = 0.5, 
-  negative_threshold = 0.25,
+  positive_threshold = 0.7, 
+  negative_threshold = 0.3,
   best_match = true,
   nearby_aversion = true
 }
