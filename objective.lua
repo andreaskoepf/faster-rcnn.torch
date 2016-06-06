@@ -95,8 +95,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local input_size = img:size()
       local cnetgrad
 
-      target[{1,1}] = 1
-      target[{1,2}] = 0
+      --target[{1,1}] = 1
+      --target[{1,2}] = 0
+
       -- process positive set
       for i,x in ipairs(p) do
         local anchor = x[1]
@@ -114,25 +115,27 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 1)
         local dc = softmax:backward(v[{{1, 2}}], 1)
         d[{{1,2}}]:add(dc)
-        clsOutput[{1,1}]=v[1]
-        clsOutput[{1,2}]=v[2]
-        pnet_confusion:batchAdd(clsOutput, target)
+
+        --clsOutput[{1,1}]=v[1]
+        --clsOutput[{1,2}]=v[2]
+        --pnet_confusion:batchAdd(clsOutput, target)
         -- box regression
-        local reg_out = v[{{3, 6}}] -- Anchor
-        local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
+
+        --local reg_out = v[{{3, 6}}] -- Anchor
+        --local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
         --reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)
         --local dr = smoothL1:backward(reg_out, reg_target)
         --d[{{3,6}}]:add(dr)
 
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[5])
+        --[[local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
         local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
-        table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
+        table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })]]
       end
 
-      target[{1,1}] = 0
-      target[{1,2}] = 1
+      --target[{1,1}] = 0
+      --target[{1,2}] = 1
       -- process negative
       for i,x in ipairs(n) do
         local anchor = x[1]
@@ -144,16 +147,17 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local d = delta_out[idx]
 
         cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
-        local dc = softmax:backward(v[{{1, 2}}], 2) * 2
+        local dc = softmax:backward(v[{{1, 2}}], 2)
         d[{{1,2}}]:add(dc)
-        clsOutput[{1,1}]=v[1]
-        clsOutput[{1,2}]=v[2]
 
-        pnet_confusion:batchAdd(clsOutput, target)
+        --clsOutput[{1,1}]=v[1]
+        --clsOutput[{1,2}]=v[2]
+
+        --pnet_confusion:batchAdd(clsOutput, target)
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[5])
+        --[[local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-        table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
+        table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })]]
       end
 
       -- fine-tuning STAGE

@@ -164,6 +164,9 @@ function BatchIterator:processImage(img, rois)
 end
 
 function BatchIterator:nextTraining(count)
+
+  self.training.i = 1 -- ########
+
   local cfg = self.cfg
   local batch = {}
   count = count or cfg.batch_size
@@ -197,13 +200,13 @@ function BatchIterator:nextTraining(count)
 
     -- find positive examples
     local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
-    local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
+    local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, true) -- cfg.best_match)
 
     -- random negative examples
     local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(1, #positive)) --20160306 16
     local count = #positive + #negative
 
-    if cfg.nearby_aversion then
+  --[[  if cfg.nearby_aversion then
       local nearby_negative = {}
       -- add all nearby negative anchors
       for i,p in ipairs(positive) do
@@ -222,7 +225,7 @@ function BatchIterator:nextTraining(count)
         table.insert(negative, nearby_negative[i])
         count = count + 1
       end
-    end
+    end]]
 
     -- debug boxes
     if false then
@@ -258,6 +261,8 @@ function BatchIterator:nextTraining(count)
   end
 
   -- add a background examples
+
+  --[[
   if #self.background.list > 0 then
     local fn = next_entry(self.background)
     local status, img = pcall(function () return load_image(fn, cfg.color_space, cfg.background_base_path) end)
@@ -276,6 +281,7 @@ function BatchIterator:nextTraining(count)
       print(string.format("Invalid image '%s': %s", fn, img))
     end
   end
+]]
 
   while count > 0 do
     count = count - try_add_next()

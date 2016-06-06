@@ -10,14 +10,14 @@ function Anchors:__init(proposal_net, scales)
   for i=1,#scales do
     self.localizers[i] = Localizer.new(proposal_net.outnode.children[i])
   end
-  
+
   -- generate vertical and horizontal min-max anchor lookup tables
   local width, height = 200, 200  -- max size of feature layers
-  
+
   -- indicies: scale, aspect-ratio, i, min/max
   self.w = torch.Tensor(#scales, 3, width, 2)
   self.h = torch.Tensor(#scales, 3, height, 2)
-  
+
   -- create simple map to enable finding of nearby anchors (e.g. enable counter-example training)
   self.cx = {}
   self.cy = {}
@@ -28,12 +28,12 @@ function Anchors:__init(proposal_net, scales)
     end
     table.insert(map[key], { i, j, v })
   end
-  
+
   for i,s in ipairs(scales) do
     -- width, height for boxes with s^2 pixels with aspect ratios 1:1, 2:1, 1:2
-    local a = s / math.sqrt(2)        
-    local aspects = { { s, s }, { 2*a, a }, { a, 2*a } }  
-    
+    local a = s / math.sqrt(2)
+    local aspects = { { s, s }, { 2*a, a }, { a, 2*a } }
+
     for j,b in ipairs(aspects) do
       local l = self.localizers[i]
       for y=1,height do
@@ -42,9 +42,9 @@ function Anchors:__init(proposal_net, scales)
         r = Rect.fromCenterWidthHeight(centerX, centerY, b[1], b[2])
         self.h[{i, j, y, 1}] = r.minY
         self.h[{i, j, y, 2}] = r.maxY
-        add(self.cy, i, j, y, centerY)      
+        add(self.cy, i, j, y, centerY)
       end
-      
+
       for x=1,width do
         local r = l:featureToInputRect(x-1, 0, x, 0)
         local centerX, centerY = r:center()
@@ -102,13 +102,13 @@ function Anchors:findRangesXY(rect, clip_rect)
     end
     return low
   end
-  
+
   local ranges = {}
   local w,h = self.w, self.h
   local s = w:size()
-  for i=1,1 do    -- scales --FIXME why not 4 
+  for i=1,3 do    -- scales --FIXME why not 4
     for j=1,3 do    -- aspect ratios1
-    
+
       local clx, cly, cux, cuy  -- lower and upper bounds of clipping rect (indices)
       if clip_rect then
          -- all vertices of anchor must lie in clip_rect (e.g. input image rect)
@@ -117,11 +117,11 @@ function Anchors:findRangesXY(rect, clip_rect)
         cux = upper_bound(w[{i, j, {}, 2}], clip_rect.maxX)   -- xend:   a.maxX > r.maxX
         cuy = upper_bound(h[{i, j, {}, 2}], clip_rect.maxY)   -- yend:   a.maxY > r.maxY
       end
-    
+
       local l = { layer = i, aspect = j }
-      
+
       -- at least one vertex must lie in rect
-      l.lx = upper_bound(w[{i, j, {}, 2}], rect.minX)   -- xbegin: a.maxX > r.minX 
+      l.lx = upper_bound(w[{i, j, {}, 2}], rect.minX)   -- xbegin: a.maxX > r.minX
       l.ly = upper_bound(h[{i, j, {}, 2}], rect.minY)   -- ybegin: a.maxY > r.minY
       l.ux = lower_bound(w[{i, j, {}, 1}], rect.maxX)   -- xend:   a.minX >= r.maxX
       l.uy = lower_bound(h[{i, j, {}, 1}], rect.maxY)   -- yend:   a.minY >= r.maxY
@@ -132,12 +132,12 @@ function Anchors:findRangesXY(rect, clip_rect)
         l.ux = math.min(l.ux, cux)
         l.uy = math.min(l.uy, cuy)
       end
-      
+
       if l.ux > l.lx and l.uy > l.ly then
         l.xs = w[{i, j, {l.lx, l.ux-1}, {}}]
         l.ys = h[{i, j, {l.ly, l.uy-1}, {}}]
         ranges[#ranges+1] = l
-      end      
+      end
 
     end
   end
@@ -148,36 +148,36 @@ end
 function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold, include_best)
   local matches = {}
   local best_set, best_iou
-  
+
   for i,roi in ipairs(roi_list) do
-    
+
     if include_best then
       best_set = {}   -- best is set to nil if a positive entry was found
       best_iou = -1
-    end 
-    
+    end
+
     -- evaluate IoU for all overlapping anchors
     local ranges = self:findRangesXY(roi.rect, clip_rect)
     for j,r in ipairs(ranges) do
       -- generate all candidate anchors from xs,ys ranges list
-      for y=1,r.ys:size()[1] do
+      for y=1,r.ys:size(1) do
         local minY, maxY = r.ys[{y, 1}], r.ys[{y, 2}]
-        for x=1,r.xs:size()[1] do
+        for x=1,r.xs:size(1) do
           -- create rect, add layer & aspect info
           local anchor_rect = Rect.new(r.xs[{x, 1}], minY, r.xs[{x, 2}], maxY)
           anchor_rect.layer = r.layer
-          anchor_rect.aspect = r.aspect 
+          anchor_rect.aspect = r.aspect
           anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
-          
+
           local v = Rect.IoU(roi.rect, anchor_rect)
           if v > pos_threshold then
             table.insert(matches, { anchor_rect, roi })
             best_set = nil
           --elseif v > neg_threshold and best_set and v >= best_iou then
           elseif best_set and v >= best_iou then
-            --if v - 0.025 > best_iou then
-            best_set = {}
-            --end
+            if v - 0.025 > best_iou then
+              best_set = {}
+            end
             table.insert(best_set, anchor_rect)
             best_iou = v
           end
@@ -190,7 +190,7 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
         table.insert(matches, { v, roi })
       end
     end
-    
+
   end
 
   return matches
@@ -199,40 +199,40 @@ end
 function Anchors:sampleNegative(image_rect, roi_list, neg_threshold, count)
   -- get ranges for all anchors inside image
   local ranges = self:findRangesXY(image_rect, image_rect)
-  
+
   -- use random sampling
   local neg = {}
   local retry = 0
   while #neg < count and retry < 500 do
-    
+
     -- select random anchor
     local r = ranges[torch.random() % #ranges + 1]
     local x = torch.random() % r.xs:size()[1] + 1
     local y = torch.random() % r.ys:size()[1] + 1
-    
+
     local anchor_rect = Rect.new(r.xs[{x, 1}], r.ys[{y, 1}], r.xs[{x, 2}], r.ys[{y, 2}])
     anchor_rect.layer = r.layer
-    anchor_rect.aspect = r.aspect 
+    anchor_rect.aspect = r.aspect
     anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
-   
+
     -- test against all rois
     local match = false
     for j,roi in ipairs(roi_list) do
       if Rect.IoU(roi.rect, anchor_rect) > neg_threshold then
         match = true
         break
-      end 
+      end
     end
-    
+
     if not match then
       retry = 0
       table.insert(neg, { anchor_rect })
     else
-      retry = retry + 1 
+      retry = retry + 1
     end
-    
+
   end
-  
+
   return neg
 end
 
@@ -249,7 +249,7 @@ function Anchors.anchorToInput(anchor, t)
     t[1] * anchor:width() + anchor.minX,
     t[2] * anchor:height() + anchor.minY,
     math.exp(t[3]) * anchor:width(),
-    math.exp(t[4]) * anchor:height() 
+    math.exp(t[4]) * anchor:height()
   )
 end
 
@@ -271,12 +271,12 @@ function Anchors.inputToAnchor(anchor, rect)
     local ex_heights = anchor:heights()+1
     local ex_ctr_x = anchor.minX + 0.5 * (ex_widths - 1)
     local ex_ctr_y = anchor.minY + 0.5 * (ex_heights - 1)
-    
+
     local gt_widths = rect:width()+1
     local gt_heights = rect:height()+1
     local gt_ctr_x = rect.minX + 0.5 * (gt_widths - 1)
     local gt_ctr_y = rect.minY + 0.5 * (gt_heights - 1)
-    
+
     local x = (gt_ctr_x - ex_ctr_x) / (ex_widths+1e-16)
     local y = (gt_ctr_y - ex_ctr_y) / (ex_heights+1e-16)
     local w = math.log(gt_widths / ex_widths)
@@ -286,12 +286,12 @@ end
 
 function Anchors.anchorToInput(anchor, t)
 
-    
+
     src_w = anchor:width()+1
     src_h = anchor:width()+1
     src_ctr_x = double(boxes(:, 1) + 0.5*(src_w-1));
     src_ctr_y = double(boxes(:, 2) + 0.5*(src_h-1));
-    
+
     dst_ctr_x = double(box_deltas(:, 1:4:end));
     dst_ctr_y = double(box_deltas(:, 2:4:end));
     dst_scl_x = double(box_deltas(:, 3:4:end));
@@ -305,14 +305,14 @@ function Anchors.anchorToInput(anchor, t)
     pred_boxes(:, 1:4:end) = pred_ctr_x - 0.5*(pred_w-1);
     pred_boxes(:, 2:4:end) = pred_ctr_y - 0.5*(pred_h-1);
     pred_boxes(:, 3:4:end) = pred_ctr_x + 0.5*(pred_w-1);
-    pred_boxes(:, 4:4:end) = pred_ctr_y + 0.5*(pred_h-1); 
+    pred_boxes(:, 4:4:end) = pred_ctr_y + 0.5*(pred_h-1);
 
 
   return Rect.fromXYWidthHeight(
     t[1] * anchor:width() + anchor.minX,
     t[2] * anchor:height() + anchor.minY,
     math.exp(t[3]) * anchor:width(),
-    math.exp(t[4]) * anchor:height() 
+    math.exp(t[4]) * anchor:height()
   )
 end
 --]]

@@ -1,9 +1,10 @@
  local imgnet_cfg = {
   class_count = 200,  -- excluding background class
   target_smaller_side = 224,
-  scales = { 32, 64, 128, 256 },
+  scales = { 48, 96, 172 },
   max_pixel_size = 1000,
-  normalization = { scaling = true, centering = true, method = 'contrastive', width = 7 },
+  --normalization = { scaling = true, centering = true, method = 'contrastive', width = 7 },
+  normalization = { scaling = true, centering = true },
   augmentation = { vflip = 0, hflip = 0.25, random_scaling = 0, aspect_jitter = 0 },
   color_space = 'yuv',
   roi_pooling = { kw = 6, kh = 6 },
