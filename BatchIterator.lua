@@ -200,7 +200,7 @@ function BatchIterator:nextTraining(count)
     local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
 
     -- random negative examples
-    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, 1) --20160306 16
+    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(1, #positive)) --20160306 16
     local count = #positive + #negative
 
     if cfg.nearby_aversion then
@@ -226,7 +226,7 @@ function BatchIterator:nextTraining(count)
 
     -- debug boxes
     if false then
-      local dimg = img 
+      local dimg = img
       if color_space == 'yuv' then
         dimg = image.yuv2rgb(img)
       elseif color_space == 'lab' then

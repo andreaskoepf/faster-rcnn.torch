@@ -12,7 +12,7 @@ function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
   return feature_layer_output[idx], idx
 end
 
-function create_objective(model, weights, gradient, batch_iterator, stats,pnet_confusion,cnet_confusion)
+function create_objective(model, weights, gradient, batch_iterator, stats, pnet_confusion, cnet_confusion)
   local cfg = model.cfg
   local pnet = model.pnet
   local cnet = model.cnet
@@ -49,7 +49,6 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     end
     gradient:zero()
 
-
     -- statistics for proposal stage
     local cls_loss, reg_loss = 0, 0
     local cls_count, reg_count = 0, 0
@@ -70,7 +69,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     local clsOutput = torch.Tensor(1,2):zero()
     clsOutput[{1,1}] = 1
     clsOutput[{1,2}] = 0
-    --gradient:zero()
+
     for i,x in ipairs(batch) do
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
       local p = x.positive        -- get positive and negative anchors examples
@@ -91,7 +90,6 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         delta_outputs[i]:resizeAs(out)
         delta_outputs[i]:zero()
       end
-
 
       local roi_pool_state = {}
       local input_size = img:size()
@@ -120,12 +118,11 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         clsOutput[{1,2}]=v[2]
         pnet_confusion:batchAdd(clsOutput, target)
         -- box regression
-        local lambda = 1--10
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
-        reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)* lambda-- * 10
-        local dr = smoothL1:backward(reg_out, reg_target)* lambda --* 10
-        d[{{3,6}}]:add(dr)
+        --reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)
+        --local dr = smoothL1:backward(reg_out, reg_target)
+        --d[{{3,6}}]:add(dr)
 
         -- pass through adaptive max pooling operation
         local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[5])
@@ -147,7 +144,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         local d = delta_out[idx]
 
         cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
-        local dc = softmax:backward(v[{{1, 2}}], 2)
+        local dc = softmax:backward(v[{{1, 2}}], 2) * 2
         d[{{1,2}}]:add(dc)
         clsOutput[{1,1}]=v[1]
         clsOutput[{1,2}]=v[2]
@@ -163,7 +160,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
       -- pass extracted roi-data through classification network
 
       -- create cnet input batch
-      if #roi_pool_state > 0 then
+     -- if #roi_pool_state > 0 then
+      if false then
         local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
         local cctarget = torch.CudaTensor(#roi_pool_state)
         local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
@@ -240,6 +238,10 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     table.insert(stats.dreg, dreg)
 
     local loss = pcls + preg
+
+    print('max grad:' .. gradient:abs():max())
+    print('mean grad:' .. gradient:abs():mean())
+
     return loss, gradient
   end
 

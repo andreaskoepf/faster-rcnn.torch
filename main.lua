@@ -30,9 +30,9 @@ cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
 cmd:option('-restore', '', 'network snapshot file name to load')
 cmd:option('-snapshot', 1000, 'snapshot interval')
 cmd:option('-plot', 100, 'plot training progress interval')
-cmd:option('-lr', 1E-4, 'learn rate')
+cmd:option('-lr', 0.5, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
-cmd:option('-opti', 'rmsprop', 'Optimizer')
+cmd:option('-opti', 'sgd', 'Optimizer')
 cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training process ect)')
 
 cmd:text('=== Misc ===')
@@ -134,8 +134,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   end
 
   local batch_iterator = BatchIterator.new(model, training_data)
-  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
-
+  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls)
 
   print '==> configuring optimizer'
   local optimState, optimMethod
@@ -156,9 +155,9 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   elseif opt.opti == 'sgd' then
     optimState = {
       learningRate = opt.lr,
-      weightDecay = 0.0,
+      weightDecay = 0,
       momentum = 0.9,
-      learningRateDecay = 1e-7
+      learningRateDecay = 0
     }
     optimMethod = optim.sgd
 
@@ -172,19 +171,15 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   else
     error('unknown optimization method')
   end
-  local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
-  --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
-  --local sgd_state = { learningRate = opt.lr, learningRateDecay= 1e-4,weightDecay = 0.0, momentum = 0.90 }
 
   for i=1,50000 do
-    if i % 5000 == 0 then
-      opt.lr = opt.lr - opt.lr/10
+    if (i % 5000) == 0 then
+      opt.lr = opt.lr - opt.lr/2
       optimState.learningRate = opt.lr
-
     end
 
     local timer = torch.Timer()
-    local _, loss =optimMethod(eval_objective_grad, weights, optimState)
+    local _, loss = optimMethod(eval_objective_grad, weights, optimState)
 
     local time = timer:time().real
 
@@ -199,13 +194,12 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       print(string.format('training pnet confusion: %s',tostring(confusion_pcls)))
       print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
       plot_training_progress(snapshot_prefix, training_stats)
-      --evaluation( model, training_data,rmsprop_state,i)
-      evaluation( model, training_data,optimState,i)
+      evaluation( model, training_data, optimState, i)
 
-      graph.dot(model.cnet.fg, 'cnet',string.format('%s/cnet_fg',opt.resultDir))
-      graph.dot(model.cnet.bg, 'cnet',string.format('%s/cnet_bg',opt.resultDir))
-      graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
-      graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
+      graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
+      graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
+      graph.dot(model.pnet.fg, 'pnet', string.format('%s/pnet_fg',opt.resultDir))
+      graph.dot(model.pnet.bg, 'pnet', string.format('%s/pnet_bg',opt.resultDir))
 
       confusion_pcls:zero()
       confusion_ccls:zero()
