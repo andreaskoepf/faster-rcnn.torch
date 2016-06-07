@@ -4,9 +4,9 @@ function vgg_small(cfg)
   -- layer here means a block of one or more convolution layers followed by a max-pooling layer
   local layers = {
     { filters= 64, kW=3, kH=3, padW=1, padH=1, dropout=0.0, conv_steps=1 },
-    { filters=128, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 },
-    { filters=256, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 },
-    { filters=384, kW=3, kH=3, padW=1, padH=1, dropout=0.4, conv_steps=2 }
+    { filters=128, kW=3, kH=3, padW=1, padH=1, dropout=0.0, conv_steps=2 },
+    { filters=256, kW=3, kH=3, padW=1, padH=1, dropout=0.0, conv_steps=2 },
+    { filters=384, kW=3, kH=3, padW=1, padH=1, dropout=0.0, conv_steps=2 }
   }
 
   local anchor_nets = {
@@ -18,7 +18,7 @@ function vgg_small(cfg)
 
   local class_layers =  {
     { n=1024, dropout=0.5, batch_norm=true },
-    { n=512, dropout=0.5 },
+    { n= 512, dropout=0.5 },
   }
 
   return create_model(cfg, layers, anchor_nets, class_layers)

@@ -256,7 +256,9 @@ function BatchIterator:nextTraining(count)
     end
 
     table.insert(batch, { img = img, positive = positive, negative = negative })
-    print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
+
+    -- uncomment for debug info about image loading
+    --print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
     return count
   end
 

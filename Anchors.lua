@@ -62,7 +62,7 @@ function Anchors:get(layer, aspect, y, x)
   local anchor_rect = Rect.new(w[{layer, aspect, x, 1}], h[{layer, aspect, y, 1}], w[{layer, aspect, x, 2}], h[{layer, aspect, y, 2}])
   anchor_rect.layer = layer
   anchor_rect.aspect = aspect
-  anchor_rect.index = { { aspect * 6 - 5, aspect * 6 }, y, x }
+  anchor_rect.index = { 1, { aspect * 6 - 5, aspect * 6 }, y, x }   -- ## add singular dimension to support batch-normalization
   return anchor_rect
 end
 
@@ -167,7 +167,7 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
           local anchor_rect = Rect.new(r.xs[{x, 1}], minY, r.xs[{x, 2}], maxY)
           anchor_rect.layer = r.layer
           anchor_rect.aspect = r.aspect
-          anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
+          anchor_rect.index = { 1, { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 } -- ## added singular dimension to support batch-normalization
 
           local v = Rect.IoU(roi.rect, anchor_rect)
           if v > pos_threshold then
@@ -213,7 +213,7 @@ function Anchors:sampleNegative(image_rect, roi_list, neg_threshold, count)
     local anchor_rect = Rect.new(r.xs[{x, 1}], r.ys[{y, 1}], r.xs[{x, 2}], r.ys[{y, 2}])
     anchor_rect.layer = r.layer
     anchor_rect.aspect = r.aspect
-    anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
+    anchor_rect.index = { 1, { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }   -- ## added singular dimension to support batch-normalization
 
     -- test against all rois
     local match = false

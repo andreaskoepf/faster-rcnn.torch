@@ -18,7 +18,7 @@ function vgg_large(cfg)
   
   local class_layers =  {
     { n=1024, dropout=0.5, batch_norm=true },
-    { n=512, dropout=0.5 },
+    { n= 512, dropout=0.5 },
   }
   
   return create_model(cfg, layers, anchor_nets, class_layers)

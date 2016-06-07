@@ -15,33 +15,39 @@ end
 function create_objective(model, weights, gradient, batch_iterator, stats, pnet_confusion, cnet_confusion)
   local cfg = model.cfg
   local pnet = model.pnet
-  local cnet = model.cnet
+  --local cnet = model.cnet
 
-  local bgclass = cfg.class_count + 1   -- background class
+  --local bgclass = cfg.class_count + 1   -- background class
   local anchors = batch_iterator.anchors
-  local localizer = Localizer.new(pnet.outnode.children[5])
+  --local localizer = Localizer.new(pnet.outnode.children[5])
 
   local softmax = nn.CrossEntropyCriterion():cuda()
-  local cnll = nn.ClassNLLCriterion():cuda()
+  --local cnll = nn.ClassNLLCriterion():cuda()
   local smoothL1 = nn.SmoothL1Criterion():cuda()
   --local smoothL1 = nn.MSECriterion():cuda()
   smoothL1.sizeAverage = false
   local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
-  local cnet_input_planes = model.layers[#model.layers].filters
-  local amp = nn.SpatialAdaptiveMaxPooling(kw, kh):cuda()
+  --local cnet_input_planes = model.layers[#model.layers].filters
+  --local amp = nn.SpatialAdaptiveMaxPooling(kw, kh):cuda()
 
   local function cleanAnchors(examples, outputs)
     local i = 1
     while i <= #examples do
       local anchor = examples[i][1]
       local fmSize = outputs[anchor.layer]:size()
-      if anchor.index[2] > fmSize[2] or anchor.index[3] > fmSize[3] then
+
+      if anchor.index[3] > fmSize[3] or anchor.index[4] > fmSize[4] then -- ## added 1 to indices to support batch-normalization
         table.remove(examples, i)   -- accessing would cause ouf of range exception
       else
         i = i + 1
       end
     end
   end
+
+
+  -- ## temp constant batch for testing
+  --local dummy_batch = batch_iterator:nextTraining()
+
 
   local function lossAndGradient(w)
     if w ~= weights then
@@ -60,15 +66,16 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
     -- enable dropouts
     pnet:training()
-    cnet:training()
+    --cnet:training()
 
     local batch = batch_iterator:nextTraining()
-    local target = torch.Tensor(1,2):zero()
+
+    --[[local target = torch.Tensor(1,2):zero()
     target[{1,1}] = 1
     target[{1,2}] = 0
     local clsOutput = torch.Tensor(1,2):zero()
     clsOutput[{1,1}] = 1
-    clsOutput[{1,2}] = 0
+    clsOutput[{1,2}] = 0]]
 
     for i,x in ipairs(batch) do
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
@@ -76,7 +83,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local n = x.negative
 
       -- run forward convolution
-      local outputs = pnet:forward(img)
+      local outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
 
       -- ensure all example anchors lie withing existing feature planes
       cleanAnchors(n, outputs)
@@ -165,63 +172,65 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
       -- create cnet input batch
      -- if #roi_pool_state > 0 then
-      if false then
-        local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
-        local cctarget = torch.CudaTensor(#roi_pool_state)
-        local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
 
-        for i,x in ipairs(roi_pool_state) do
-          cinput[i] = x.output
-          if x.roi then
-            -- positive example
-            cctarget[i] = x.roi.class_index
-            crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
-          else
-            -- negative example
-            cctarget[i] = bgclass
-          end
-          --delta_outputs[i]:resizeAs(out)
-          --delta_outputs[i]:zero()
-        end
-
-        -- process classification batch
-        local coutputs = cnet:forward(cinput)
-
-        -- compute classification and regression error and run backward pass
-        local lambda = 10
-        local crout = coutputs[1]
-        crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
-        creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
-        local crdelta = smoothL1:backward(crout, crtarget) * lambda
-
-        local ccout = coutputs[2]  -- log softmax classification
-
-        --criterion ClassNLL
-        local loss = cnll:forward(ccout, cctarget)
-        ccls_loss = ccls_loss + loss
-        local ccdelta = cnll:backward(ccout, cctarget)
-
-        --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
-        local ccdelta = softmax:backward(ccout, cctarget)--]]
-
-        local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
-
-        cnet_confusion:batchAdd(ccout, cctarget)
-        -- run backward pass over rois
-        for i,x in ipairs(roi_pool_state) do
-          amp.indices = x.indices
-          delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
-        end
-      end
+---      if false then
+---        local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
+---        local cctarget = torch.CudaTensor(#roi_pool_state)
+---        local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
+---
+---        for i,x in ipairs(roi_pool_state) do
+---          cinput[i] = x.output
+---          if x.roi then
+---            -- positive example
+---            cctarget[i] = x.roi.class_index
+---            crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
+---          else
+---            -- negative example
+---            cctarget[i] = bgclass
+---          end
+---          --delta_outputs[i]:resizeAs(out)
+---          --delta_outputs[i]:zero()
+---        end
+---
+---        -- process classification batch
+---        local coutputs = cnet:forward(cinput)
+---
+---        -- compute classification and regression error and run backward pass
+---        local lambda = 10
+---        local crout = coutputs[1]
+---        crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
+---        creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
+---        local crdelta = smoothL1:backward(crout, crtarget) * lambda
+---
+---        local ccout = coutputs[2]  -- log softmax classification
+---
+---        --criterion ClassNLL
+---        local loss = cnll:forward(ccout, cctarget)
+---        ccls_loss = ccls_loss + loss
+---        local ccdelta = cnll:backward(ccout, cctarget)
+---
+---        --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
+---        local ccdelta = softmax:backward(ccout, cctarget)--]]
+---
+---        local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
+---
+---        cnet_confusion:batchAdd(ccout, cctarget)
+---        -- run backward pass over rois
+---        for i,x in ipairs(roi_pool_state) do
+---          amp.indices = x.indices
+---          delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
+---        end
+---      end
 
       -- backward pass of proposal network
       local gi = pnet:backward(img, delta_outputs)
+
       -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
       reg_count = reg_count + #p
       cls_count = cls_count + #p + #n
 
-      creg_count = creg_count + #p
-      ccls_count = ccls_count + 1
+ ---     creg_count = creg_count + #p
+---      ccls_count = ccls_count + 1
     end
 
     -- scale gradient
@@ -243,8 +252,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
     local loss = pcls + preg
 
-    print('max grad:' .. gradient:abs():max())
-    print('mean grad:' .. gradient:abs():mean())
+    print(string.format('Gradient: max %f; mean %f', gradient:abs():max(), gradient:abs():mean()))
 
     return loss, gradient
   end

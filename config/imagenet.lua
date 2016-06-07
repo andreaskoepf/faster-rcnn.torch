@@ -10,7 +10,7 @@
   roi_pooling = { kw = 6, kh = 6 },
   examples_base_path = '',
   background_base_path = '',
-  batch_size = 200,
+  batch_size = 256,
   positive_threshold = 0.7,
   negative_threshold = 0.3,
   best_match = true,

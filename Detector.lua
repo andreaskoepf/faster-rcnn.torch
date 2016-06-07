@@ -32,13 +32,18 @@ function Detector:detect(input)
   -- pass image through network
   pnet:evaluate()
   input = input:cuda()
-  local outputs = pnet:forward(input)
+  local outputs = pnet:forward(input:view(1, input:size(1), input:size(2), input:size(3)))
 
   -- analyse network output for non-background classification
   local matches = {}
 
+  if true then
+    return {} --###########
+  end
+
+
   local aspect_ratios = 3
-  for i=1,4 do
+  for i=1,#outputs do
     local layer = outputs[i]
     local layer_size = layer:size()
     for y=1,layer_size[2] do
@@ -99,7 +104,7 @@ function Detector:detect(input)
     local cinput = torch.CudaTensor(#candidates, cfg.roi_pooling.kw * cfg.roi_pooling.kh * cnet_input_planes)
     for i,v in ipairs(candidates) do
       -- pass through adaptive max pooling operation
-      local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[5])
+      local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[#outputs])
       cinput[i] = amp:forward(pi):view(cfg.roi_pooling.kw * cfg.roi_pooling.kh * cnet_input_planes)
     end
 

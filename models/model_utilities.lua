@@ -4,21 +4,26 @@ function create_proposal_net(layers, anchor_nets)
   -- define  building block functions first
 
   -- VGG style 3x3 convolution building block
-  local function ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout)
+  local function ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, bn)
     container:add(nn.SpatialConvolution(nInputPlane, nOutputPlane, kW,kH, 1,1, padW,padH))
-    container:add(nn.ReLU())
+    container:add(nn.PReLU())
     if dropout and dropout > 0 then
       container:add(nn.SpatialDropout(dropout))
+    end
+    if bn then
+      container:add(nn.SpatialBatchNormalization(nOutputPlane, 1e-3))
     end
     return container
   end
   
   -- multiple convolution layers followed by a max-pooling layer
   local function ConvPoolBlock(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, conv_steps)
+    local bn = true
     for i=1,conv_steps do
-      ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout)
+      ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, bn)
       nInputPlane = nOutputPlane
-      dropout = nil -- only one dropout layer per conv-pool block 
+      dropout = nil -- only one dropout layer per conv-pool block
+      bn = false
     end
     container:add(nn.SpatialMaxPooling(2, 2, 2, 2):ceil())
     return container
@@ -29,7 +34,7 @@ function create_proposal_net(layers, anchor_nets)
   local function AnchorNetwork(nInputPlane, n, kernelWidth)
     local net = nn.Sequential()
     net:add(nn.SpatialConvolution(nInputPlane, n, kernelWidth,kernelWidth, 1,1))
-    net:add(nn.ReLU())
+    net:add(nn.PReLU())
     net:add(nn.SpatialConvolution(n, 3 * (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
     return net
   end
@@ -83,7 +88,7 @@ function create_classification_net(inputs, class_count, class_layers)
     if l.batch_norm then
       net:add(nn.BatchNormalization(l.n))
     end
-    net:add(nn.ReLU())
+    net:add(nn.PReLU())
     if l.dropout and l.dropout > 0 then
       net:add(nn.Dropout(l.dropout))
     end
