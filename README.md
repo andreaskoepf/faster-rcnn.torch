@@ -1,6 +1,6 @@
 # faster-rcnn
 This is an experimental Torch7 implementation of Faster RCNN - a convnet for object detection with a region proposal network.
-For details about R-CNN please refer to the paper [Faster R-CNN: Towards Real-Time Object Detection with Region Proposal Networks](http://arxiv.org/pdf/1504.08083v1.pdf) by Shaoqing Ren, Kaiming He, Ross Girshick, Jian Sun.
+For details about R-CNN please refer to the paper [Faster R-CNN: Towards Real-Time Object Detection with Region Proposal Networks](http://arxiv.org/pdf/1506.01497v3.pdf) by Shaoqing Ren, Kaiming He, Ross Girshick, Jian Sun.
 
 ## Work in progress
 Status: Basic detection in my personal environment works.
