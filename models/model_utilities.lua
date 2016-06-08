@@ -18,7 +18,7 @@ function create_proposal_net(layers, anchor_nets)
   
   -- multiple convolution layers followed by a max-pooling layer
   local function ConvPoolBlock(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, conv_steps)
-    local bn = true
+    local bn = false
     for i=1,conv_steps do
       ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, bn)
       nInputPlane = nOutputPlane

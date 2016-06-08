@@ -168,6 +168,29 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     }
     optimMethod = optim.rmsprop
 
+  elseif opt.opti == 'adagrad' then
+    optimState = {
+      learningRate = opt.lr,
+      learningRateDecay = 0,
+      weightDecay = 0
+    }
+    optimMethod = optim.adagrad
+
+  elseif opt.opti == 'adam' then
+    optimState = {
+      learningRate = opt.lr,
+      beta1 = 0.9,      -- first moment coefficient
+      beta2 = 0.999    -- second moment coefficient
+    }
+    optimMethod = optim.adam
+
+  elseif opt.opti == 'adadelta' then
+    optimState = {
+      rho = 0.9, -- interpolation parameter
+      weightDecay = 0
+    }
+    optimMethod = optim.adadelta
+
   else
     error('unknown optimization method')
   end
