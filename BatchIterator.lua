@@ -165,8 +165,6 @@ end
 
 function BatchIterator:nextTraining(count)
 
-  self.training.i = 1 -- ########
-
   local cfg = self.cfg
   local batch = {}
   count = count or cfg.batch_size

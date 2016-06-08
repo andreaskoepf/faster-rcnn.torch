@@ -30,7 +30,7 @@ cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
 cmd:option('-restore', '', 'network snapshot file name to load')
 cmd:option('-snapshot', 1000, 'snapshot interval')
 cmd:option('-plot', 100, 'plot training progress interval')
-cmd:option('-lr', 1E-4, 'learn rate')
+cmd:option('-lr', 1E-3, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
 cmd:option('-opti', 'sgd', 'Optimizer')
 cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training process ect)')
@@ -155,8 +155,8 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   elseif opt.opti == 'sgd' then
     optimState = {
       learningRate = opt.lr,
-      weightDecay = 0,
-      momentum = 0.9,
+      weightDecay = 1E-5,
+      momentum = 0.6,
       learningRateDecay = 0
     }
     optimMethod = optim.sgd

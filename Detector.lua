@@ -58,7 +58,7 @@ function Detector:detect(input)
           -- classification
           local c = lsm:forward(cls_out)
           --if c[1] > c[2] then
-          local c_norm= m:forward(cls_out)
+          local c_norm = m:forward(cls_out)
           --if math.exp(c[1]) > 0.9 then  -- only two classes (foreground and background)
 
           if c_norm[1] > 0.7 then  -- only two classes (foreground and background)

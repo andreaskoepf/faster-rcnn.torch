@@ -70,13 +70,6 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
     local batch = batch_iterator:nextTraining()
 
-    --[[local target = torch.Tensor(1,2):zero()
-    target[{1,1}] = 1
-    target[{1,2}] = 0
-    local clsOutput = torch.Tensor(1,2):zero()
-    clsOutput[{1,1}] = 1
-    clsOutput[{1,2}] = 0]]
-
     for i,x in ipairs(batch) do
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
       local p = x.positive        -- get positive and negative anchors examples
@@ -102,8 +95,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local input_size = img:size()
       local cnetgrad
 
-      --target[{1,1}] = 1
-      --target[{1,2}] = 0
+      local target = torch.Tensor({{1,0}})
 
       -- process positive set
       for i,x in ipairs(p) do
@@ -123,9 +115,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local dc = softmax:backward(v[{{1, 2}}], 1)
         d[{{1,2}}]:add(dc)
 
-        --clsOutput[{1,1}]=v[1]
-        --clsOutput[{1,2}]=v[2]
-        --pnet_confusion:batchAdd(clsOutput, target)
+        pnet_confusion:batchAdd(v[{{1, 2}}]:reshape(1,2), target)
+
         -- box regression
 
         --local reg_out = v[{{3, 6}}] -- Anchor
@@ -141,8 +132,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })]]
       end
 
-      --target[{1,1}] = 0
-      --target[{1,2}] = 1
+      target = torch.Tensor({{0,1}})
+      
       -- process negative
       for i,x in ipairs(n) do
         local anchor = x[1]
@@ -157,10 +148,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local dc = softmax:backward(v[{{1, 2}}], 2)
         d[{{1,2}}]:add(dc)
 
-        --clsOutput[{1,1}]=v[1]
-        --clsOutput[{1,2}]=v[2]
-
-        --pnet_confusion:batchAdd(clsOutput, target)
+        pnet_confusion:batchAdd(v[{{1, 2}}]:reshape(1,2), target)
         -- pass through adaptive max pooling operation
         --[[local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
@@ -252,7 +240,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
     local loss = pcls + preg
 
-    print(string.format('Gradient: max %f; mean %f', gradient:abs():max(), gradient:abs():mean()))
+    local absgrad = torch.abs(gradient)
+    print(string.format('Gradient: max %f; mean %f', absgrad:max(), absgrad:mean()))
 
     return loss, gradient
   end
