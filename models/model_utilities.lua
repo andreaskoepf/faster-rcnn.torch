@@ -6,12 +6,12 @@ function create_proposal_net(layers, anchor_nets)
   -- VGG style 3x3 convolution building block
   local function ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, bn)
     container:add(nn.SpatialConvolution(nInputPlane, nOutputPlane, kW,kH, 1,1, padW,padH))
+    if bn then
+      container:add(nn.SpatialBatchNormalization(nOutputPlane, 1e-3))
+    end
     container:add(nn.PReLU())
     if dropout and dropout > 0 then
       container:add(nn.SpatialDropout(dropout))
-    end
-    if bn then
-      container:add(nn.SpatialBatchNormalization(nOutputPlane, 1e-3))
     end
     return container
   end
