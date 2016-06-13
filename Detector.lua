@@ -37,12 +37,43 @@ function Detector:detect(input)
   -- analyse network output for non-background classification
   local matches = {}
 
-  if true then
-    return {} --###########
+  -- only analyze anchors which are fully inside the input image
+  local ranges = self.anchors:findRangesXY(input_rect, input_rect)
+  for i,r in ipairs(ranges) do
+    local layer = outputs[r.layer]
+    local a = r.aspect
+    local ofs = (a-1) * 6
+
+    for y=r.ly,r.uy-1 do
+      for x=r.lx,r.ux-1 do
+
+        local cls_out = layer[{1, {ofs + 1, ofs + 2}, y, x}]
+        local reg_out = layer[{1, {ofs + 3, ofs + 6}, y, x}]
+
+        -- classification
+        local c_prop = m:forward(cls_out)
+
+        if c_prop[1] > 0.7 then  -- only two classes (foreground and background)
+
+          -- regression
+          local a_ = self.anchors:get(r.layer, a, y, x)
+          local anchor_rect = Anchors.anchorToInput(a_, reg_out)
+          if anchor_rect:overlaps(input_rect) then
+            table.insert(matches, { p=c_prop[1], a=a_, r=anchor_rect, l=r.layer })
+          end
+
+        end
+
+      end
+    end
+
   end
 
+  return matches
 
-  local aspect_ratios = 3
+  -- OLD IMPL ...
+
+  --[[local aspect_ratios = 3
   for i=1,#outputs do
     local layer = outputs[i]
     local layer_size = layer:size()
@@ -75,9 +106,9 @@ function Detector:detect(input)
       end
     end
   end
+]]
 
-
-  local winners = {}
+--[[  local winners = {}
 
   if #matches > 0 then
 
@@ -150,5 +181,5 @@ function Detector:detect(input)
 
   end
 
-  return winners
+  return winners]]
 end

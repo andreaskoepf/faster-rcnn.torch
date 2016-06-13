@@ -106,8 +106,8 @@ function Anchors:findRangesXY(rect, clip_rect)
   local ranges = {}
   local w,h = self.w, self.h
   local s = w:size()
-  for i=1,3 do    -- scales --FIXME why not 4
-    for j=1,3 do    -- aspect ratios1
+  for i=1,3 do    -- scales
+    for j=1,3 do    -- aspect ratios
 
       local clx, cly, cux, cuy  -- lower and upper bounds of clipping rect (indices)
       if clip_rect then

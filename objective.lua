@@ -48,6 +48,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
   -- ## temp constant batch for testing
   --local dummy_batch = batch_iterator:nextTraining()
 
+  local lambda = 5    -- weight for box proposal regression
 
   local function lossAndGradient(w)
     if w ~= weights then
@@ -118,12 +119,11 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         pnet_confusion:batchAdd(v[{{1, 2}}]:reshape(1,2), target)
 
         -- box regression
-
-        --local reg_out = v[{{3, 6}}] -- Anchor
-        --local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
-        --reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)
-        --local dr = smoothL1:backward(reg_out, reg_target)
-        --d[{{3,6}}]:add(dr)
+        local reg_out = v[{{3, 6}}] -- Anchor
+        local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
+        reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda
+        local dr = smoothL1:backward(reg_out, reg_target) * lambda
+        d[{{3,6}}]:add(dr)
 
         -- pass through adaptive max pooling operation
         --[[local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[#outputs])
@@ -133,7 +133,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       end
 
       target = torch.Tensor({{0,1}})
-      
+
       -- process negative
       for i,x in ipairs(n) do
         local anchor = x[1]

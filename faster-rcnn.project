@@ -112,4 +112,7 @@
     <File Name="models/vgg_large.lua"/>
     <File Name="models/vgg_small.lua"/>
   </VirtualDirectory>
+  <VirtualDirectory Name="modules">
+    <File Name="modules/RegionProposals.lua"/>
+  </VirtualDirectory>
 </CodeLite_Project>

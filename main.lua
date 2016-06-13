@@ -164,7 +164,8 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   elseif opt.opti == 'rmsprop' then
     optimState = {
       learningRate = opt.lr,
-      alpha = opt.rms_decay
+      alpha = opt.rms_decay,
+      epsilon = 1E-3
     }
     optimMethod = optim.rmsprop
 
@@ -180,7 +181,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     optimState = {
       learningRate = opt.lr,
       beta1 = 0.9,      -- first moment coefficient
-      beta2 = 0.999    -- second moment coefficient
+      beta2 = 0.999     -- second moment coefficient
     }
     optimMethod = optim.adam
 
