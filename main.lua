@@ -1,5 +1,6 @@
 require 'torch'
 require 'pl'
+require 'lfs'
 require 'optim'
 require 'image'
 require 'nngraph'
@@ -117,6 +118,64 @@ function load_model(cfg, model_path, network_filename, cuda)
 
   return model, weights, gradient, training_stats
 end
+
+
+function extract_receptive_fields(cfg, model_path, training_data_filename)
+  local training_data = load_obj(training_data_filename)
+  local model, weights, gradient, training_stats = load_model(cfg, model_path, nil, true)
+
+  -- find anchor size
+  local anchors = Anchors.new(model.pnet, cfg.scales)
+  local localizer = anchors.localizers[1]
+
+  local receptive_field_size = localizer:featureToInputRect(0,0,1,1)
+  local w,h = receptive_field_size:size()
+
+  -- create output directories with class id
+  local class_dir_names = {}
+  for i=1,cfg.class_count do
+    local dir_name = string.format("%04d", i)
+    lfs.mkdir(dir_name)
+    table.insert(class_dir_names, dir_name)
+  end
+
+  -- TODO: build and store new ground-truth data
+
+  -- load image one by one from traning set and try to crop rois with full receptive field
+  for j,fn in training_data.training_set do
+    local file_entry = training_data.ground_truth[fn]
+    local rois = file_entry.rois
+
+    -- load image
+    local status, img = pcall(function () return load_image(fn, 'rgb', cfg.examples_base_path) end)
+    if status then
+
+      local img_size = img:size()
+      local image_rect = Rect.new(0, 0, img_size[3], img_size[2])
+
+      -- extract rois with receptive field
+      for i,roi in ipairs(rois) do
+        local cx,cy = roi.rect:center()
+        local crop_rect = Rect.fromCenterWidthHeight(cx, cy, w, h)
+
+        if image_rect:contains(crop_rect) then
+
+          -- extract receptive field at roi center position
+          local part = img[{{}, {crop_rect.minY+1, crop_rect.maxY}, {crop_rect.minX+1, crop_rect.maxX}}]
+          local fn_ = path.splitext(path.basename(fn))
+          local part_fn = string.format('%s/%s_%d.jpg', class_dir_names[roi.class_index], fn_, i)
+          print(part_fn)
+          image.saveJPG(part_fn, part)
+
+        end
+      end
+
+    end
+
+  end
+
+end
+
 
 function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
   local training_data = load_obj(training_data_filename)
@@ -399,6 +458,8 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
 
 end
 
-graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+--graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
 --evaluation_demo(cfg, opt.model, opt.train, opt.restore)
+
+extract_receptive_fields(cfg, opt.model, opt.train)
 
