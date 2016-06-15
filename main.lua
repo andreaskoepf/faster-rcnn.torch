@@ -140,11 +140,19 @@ function extract_receptive_fields(cfg, model_path, training_data_filename)
   end
 
   -- TODO: build and store new ground-truth data
+  local data = { ground_truth = {}, training_set = {}, training_by_class = {}, validation_set = {} }
+
+  local j = 0
+
+  local ts = {}
+  for i,fn in ipairs(training_data.training_set) do
+    ts[fn] = true
+  end
 
   -- load image one by one from traning set and try to crop rois with full receptive field
-  for j,fn in training_data.training_set do
-    local file_entry = training_data.ground_truth[fn]
+  for fn,file_entry in pairs(training_data.ground_truth) do
     local rois = file_entry.rois
+    local is_training_entry = (ts[fn] ~= nil)
 
     -- load image
     local status, img = pcall(function () return load_image(fn, 'rgb', cfg.examples_base_path) end)
@@ -163,16 +171,40 @@ function extract_receptive_fields(cfg, model_path, training_data_filename)
           -- extract receptive field at roi center position
           local part = img[{{}, {crop_rect.minY+1, crop_rect.maxY}, {crop_rect.minX+1, crop_rect.maxX}}]
           local fn_ = path.splitext(path.basename(fn))
+
           local part_fn = string.format('%s/%s_%d.jpg', class_dir_names[roi.class_index], fn_, i)
           print(part_fn)
           image.saveJPG(part_fn, part)
+
+          data.ground_truth[part_fn] = {
+            class_index = roi.class_index,
+            rect = Rect.fromCenterWidthHeight(w/2, h/2, roi.rect:width(), roi.rect:height())
+          }
+
+          print(data.ground_truth[part_fn])
+
+          if is_training_entry == true then
+            table.insert(data.training_set, part_fn)
+            if data.training_by_class[roi.class_index] == nil then
+              data.training_by_class[roi.class_index] = {}
+            end
+            table.insert(data.training_by_class[roi.class_index], part_fn)
+          else
+            table.insert(data.validation_set, part_fn)
+          end
 
         end
       end
 
     end
 
+    j = j + 1
+    if (j%50000) == 0 then
+      torch.save('receptive_fields_data.t7', data)
+    end
   end
+
+  torch.save('receptive_fields_data.t7', data)
 
 end
 

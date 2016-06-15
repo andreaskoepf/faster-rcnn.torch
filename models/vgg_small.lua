@@ -11,9 +11,9 @@ function vgg_small(cfg)
 
   local anchor_nets = {
   --  { kW=3, n=256, input=3 },   -- input refers to the 'layer' defined above
-    { kW=3, n=256, input=4 },
-    { kW=3, n=256, input=4 },
-    { kW=3, n=256, input=4 }
+    { kW=4, n=256, input=4 },
+    { kW=4, n=256, input=4 },
+    { kW=4, n=256, input=4 }
   }
 
   local class_layers =  {
