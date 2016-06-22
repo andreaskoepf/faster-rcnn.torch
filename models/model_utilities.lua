@@ -1,8 +1,6 @@
 require 'nngraph'
 
-function create_proposal_net(layers, anchor_nets)
-  -- define  building block functions first
-
+function create_conv_layers(layers, input)
   -- VGG style 3x3 convolution building block
   local function ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, bn)
     container:add(nn.SpatialConvolution(nInputPlane, nOutputPlane, kW,kH, 1,1, padW,padH))
@@ -15,7 +13,7 @@ function create_proposal_net(layers, anchor_nets)
     end
     return container
   end
-  
+
   -- multiple convolution layers followed by a max-pooling layer
   local function ConvPoolBlock(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, conv_steps)
     local bn = false
@@ -27,7 +25,62 @@ function create_proposal_net(layers, anchor_nets)
     end
     container:add(nn.SpatialMaxPooling(2, 2, 2, 2):ceil())
     return container
-  end  
+  end
+
+  local conv_outputs = {}
+
+  local inputs = 3
+  local prev = input
+  for i,l in ipairs(layers) do
+    local net = nn.Sequential()
+    ConvPoolBlock(net, inputs, l.filters, l.kW, l.kH, l.padW, l.padH, l.dropout, l.conv_steps)
+    inputs = l.filters
+    prev = net(prev)
+    table.insert(conv_outputs, prev)
+  end
+
+  return conv_outputs
+end
+
+function gaussian_init(module, name)
+  local function init_module(m)
+    for k,v in pairs(m:findModules(name)) do
+      local n = v.kW * v.kH * v.nOutputPlane
+      v.weight:normal(0, math.sqrt(2 / n))
+      v.bias:zero()
+    end
+  end
+  module:apply(init_module)
+end
+
+function create_simple_pretraining_net(layers, conv_output_count, class_count, fc_size)
+  local input = nn.Identity()()
+  local conv_outputs = create_conv_layers(layers, input)
+
+  -- add alexnet like FC layers
+  fc_size = fc_size or 2048
+  local classifier = nn.Sequential()
+
+  classifier:add(nn.View(conv_output_count))
+  classifier:add(nn.Dropout(0.5))
+  classifier:add(nn.Linear(conv_output_count, fc_size))
+  classifier:add(nn.ReLU())
+
+  classifier:add(nn.Dropout(0.5))
+  classifier:add(nn.Linear(fc_size, fc_size))
+  classifier:add(nn.ReLU())
+
+  classifier:add(nn.Linear(fc_size, class_count))
+  classifier:add(nn.LogSoftMax())
+
+  local classifier_output = classifier(conv_outputs[#conv_outputs])
+
+  local model = nn.gModule({ input }, { classifier_output })
+  gaussian_init(model, 'nn.SpatialConvolution')
+  return model
+end
+
+function create_proposal_net(layers, anchor_nets)
   
   -- creates an anchor network which reduces the input first to 256 dimensions 
   -- and then further to the anchor outputs for 3 aspect ratios 
@@ -40,19 +93,8 @@ function create_proposal_net(layers, anchor_nets)
   end
 
   local input = nn.Identity()()
-    
-  local conv_outputs = {}
-  
-  local inputs = 3
-  local prev = input
-  for i,l in ipairs(layers) do
-    local net = nn.Sequential()
-    ConvPoolBlock(net, inputs, l.filters, l.kW, l.kH, l.padW, l.padH, l.dropout, l.conv_steps)
-    inputs = l.filters
-    prev = net(prev)
-    table.insert(conv_outputs, prev)
-  end
-  
+  local conv_outputs = create_conv_layers(layers, input)
+
   local proposal_outputs = {}
   for i,a in ipairs(anchor_nets) do
     table.insert(proposal_outputs, AnchorNetwork(layers[a.input].filters, a.n, a.kW)(conv_outputs[a.input]))
@@ -61,20 +103,7 @@ function create_proposal_net(layers, anchor_nets)
   
     -- create proposal net module, outputs: anchor net outputs followed by last conv-layer output
   local model = nn.gModule({ input }, proposal_outputs)
-  
-  local function init(module, name)
-    local function init_module(m)
-      for k,v in pairs(m:findModules(name)) do
-        local n = v.kW * v.kH * v.nOutputPlane
-        v.weight:normal(0, math.sqrt(2 / n))
-        v.bias:zero()
-      end
-    end
-    module:apply(init_module)
-  end
-
-  init(model, 'nn.SpatialConvolution')
-  
+  gaussian_init(model, 'nn.SpatialConvolution')
   return model
 end
 

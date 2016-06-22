@@ -102,6 +102,7 @@
     <File Name="Detector.lua"/>
     <File Name="Localizer.lua"/>
     <File Name="Rect.lua"/>
+    <File Name="proposal_training.lua"/>
   </VirtualDirectory>
   <VirtualDirectory Name="config">
     <File Name="config/duplo.lua"/>
