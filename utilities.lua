@@ -216,3 +216,7 @@ function load_image(fn, color_space, base_path)
   end
   return img
 end
+
+function printf(...)
+  print(string.format(...))
+end

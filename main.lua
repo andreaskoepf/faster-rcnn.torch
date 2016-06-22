@@ -1,4 +1,4 @@
-require 'torch'
+requFlrire 'torch'
 require 'pl'
 require 'lfs'
 require 'optim'
@@ -34,7 +34,7 @@ cmd:option('-plot', 100, 'plot training progress interval')
 cmd:option('-lr', 1E-3, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
 cmd:option('-opti', 'sgd', 'Optimizer')
-cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training process ect)')
+cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training progress etc.)')
 
 cmd:text('=== Misc ===')
 cmd:option('-threads', 8, 'number of threads')
@@ -117,95 +117,6 @@ function load_model(cfg, model_path, network_filename, cuda)
   end
 
   return model, weights, gradient, training_stats
-end
-
-
-function extract_receptive_fields(cfg, model_path, training_data_filename)
-  local training_data = load_obj(training_data_filename)
-  local model, weights, gradient, training_stats = load_model(cfg, model_path, nil, true)
-
-  -- find anchor size
-  local anchors = Anchors.new(model.pnet, cfg.scales)
-  local localizer = anchors.localizers[1]
-
-  local receptive_field_size = localizer:featureToInputRect(0,0,1,1)
-  local w,h = receptive_field_size:size()
-
-  -- create output directories with class id
-  local class_dir_names = {}
-  for i=1,cfg.class_count do
-    local dir_name = string.format("%04d", i)
-    lfs.mkdir(dir_name)
-    table.insert(class_dir_names, dir_name)
-  end
-
-  -- TODO: build and store new ground-truth data
-  local data = { ground_truth = {}, training_set = {}, training_by_class = {}, validation_set = {} }
-
-  local j = 0
-
-  local ts = {}
-  for i,fn in ipairs(training_data.training_set) do
-    ts[fn] = true
-  end
-
-  -- load image one by one from traning set and try to crop rois with full receptive field
-  for fn,file_entry in pairs(training_data.ground_truth) do
-    local rois = file_entry.rois
-    local is_training_entry = (ts[fn] ~= nil)
-
-    -- load image
-    local status, img = pcall(function () return load_image(fn, 'rgb', cfg.examples_base_path) end)
-    if status then
-
-      local img_size = img:size()
-      local image_rect = Rect.new(0, 0, img_size[3], img_size[2])
-
-      -- extract rois with receptive field
-      for i,roi in ipairs(rois) do
-        local cx,cy = roi.rect:center()
-        local crop_rect = Rect.fromCenterWidthHeight(cx, cy, w, h)
-
-        if image_rect:contains(crop_rect) then
-
-          -- extract receptive field at roi center position
-          local part = img[{{}, {crop_rect.minY+1, crop_rect.maxY}, {crop_rect.minX+1, crop_rect.maxX}}]
-          local fn_ = path.splitext(path.basename(fn))
-
-          local part_fn = string.format('%s/%s_%d.jpg', class_dir_names[roi.class_index], fn_, i)
-          print(part_fn)
-          image.saveJPG(part_fn, part)
-
-          data.ground_truth[part_fn] = {
-            class_index = roi.class_index,
-            rect = Rect.fromCenterWidthHeight(w/2, h/2, roi.rect:width(), roi.rect:height())
-          }
-
-          print(data.ground_truth[part_fn])
-
-          if is_training_entry == true then
-            table.insert(data.training_set, part_fn)
-            if data.training_by_class[roi.class_index] == nil then
-              data.training_by_class[roi.class_index] = {}
-            end
-            table.insert(data.training_by_class[roi.class_index], part_fn)
-          else
-            table.insert(data.validation_set, part_fn)
-          end
-
-        end
-      end
-
-    end
-
-    j = j + 1
-    if (j%50000) == 0 then
-      torch.save('receptive_fields_data.t7', data)
-    end
-  end
-
-  torch.save('receptive_fields_data.t7', data)
-
 end
 
 
@@ -490,8 +401,5 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
 
 end
 
---graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
 --evaluation_demo(cfg, opt.model, opt.train, opt.restore)
-
-extract_receptive_fields(cfg, opt.model, opt.train)
-
