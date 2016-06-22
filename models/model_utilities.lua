@@ -64,11 +64,11 @@ function create_simple_pretraining_net(layers, conv_output_count, class_count, f
   classifier:add(nn.View(conv_output_count))
   classifier:add(nn.Dropout(0.5))
   classifier:add(nn.Linear(conv_output_count, fc_size))
-  classifier:add(nn.ReLU())
+  classifier:add(nn.ReLU(true))
 
   classifier:add(nn.Dropout(0.5))
   classifier:add(nn.Linear(fc_size, fc_size))
-  classifier:add(nn.ReLU())
+  classifier:add(nn.ReLU(true))
 
   classifier:add(nn.Linear(fc_size, class_count))
   classifier:add(nn.LogSoftMax())
@@ -81,9 +81,9 @@ function create_simple_pretraining_net(layers, conv_output_count, class_count, f
 end
 
 function create_proposal_net(layers, anchor_nets)
-  
-  -- creates an anchor network which reduces the input first to 256 dimensions 
-  -- and then further to the anchor outputs for 3 aspect ratios 
+
+  -- creates an anchor network which reduces the input first to 256 dimensions
+  -- and then further to the anchor outputs for 3 aspect ratios
   local function AnchorNetwork(nInputPlane, n, kernelWidth)
     local net = nn.Sequential()
     net:add(nn.SpatialConvolution(nInputPlane, n, kernelWidth,kernelWidth, 1,1))
@@ -100,7 +100,7 @@ function create_proposal_net(layers, anchor_nets)
     table.insert(proposal_outputs, AnchorNetwork(layers[a.input].filters, a.n, a.kW)(conv_outputs[a.input]))
   end
   table.insert(proposal_outputs, conv_outputs[#conv_outputs])
-  
+
     -- create proposal net module, outputs: anchor net outputs followed by last conv-layer output
   local model = nn.gModule({ input }, proposal_outputs)
   gaussian_init(model, 'nn.SpatialConvolution')
@@ -110,7 +110,7 @@ end
 function create_classification_net(inputs, class_count, class_layers)
   -- create classifiaction network
   local net = nn.Sequential()
-  
+
   local prev_input_count = inputs
   for i,l in ipairs(class_layers) do
     net:add(nn.Linear(prev_input_count, l.n))
@@ -123,21 +123,21 @@ function create_classification_net(inputs, class_count, class_layers)
     end
     prev_input_count = l.n
   end
-  
+
   local input = nn.Identity()()
   local node = net(input)
-  
+
   -- now the network splits into regression and classification branches
-  
+
   -- regression output
   local rout = nn.Linear(prev_input_count, 4)(node)
-  
+
   -- classification output
   local cnet = nn.Sequential()
   cnet:add(nn.Linear(prev_input_count, class_count))
   cnet:add(nn.LogSoftMax())
   local cout = cnet(node)
-  
+
   -- create bbox finetuning + classification output
   local model = nn.gModule({ input }, { rout, cout })
 
@@ -153,13 +153,13 @@ function create_classification_net(inputs, class_count, class_layers)
   end
 
   init(model, 'nn.SpatialConvolution')
-  
+
   return model
 end
 
 function create_model(cfg, layers, anchor_nets, class_layers)
   local cnet_ninputs = cfg.roi_pooling.kh * cfg.roi_pooling.kw * layers[#layers].filters
-  local model = 
+  local model =
   {
     cfg = cfg,
     layers = layers,

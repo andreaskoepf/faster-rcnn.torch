@@ -2,6 +2,7 @@ require 'torch'
 require 'optim'
 require 'image'
 require 'cunn'
+require 'gnuplot'
 
 require 'utilities'
 require 'Anchors'
@@ -20,7 +21,6 @@ cmd:option('-model', 'models/vgg_small.lua', 'model factory file')
 cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix')
 cmd:option('-train', 'receptive_fields_data.t7', 'training data file name')
 cmd:option('-resultDir', 'proposal_logs', 'Folder for storing all result. (training process ect)')
-cmd:option('-lr', 1E-3, 'learn rate')
 
 cmd:text('=== Misc ===')
 cmd:option('-threads', 8, 'number of threads')
@@ -37,6 +37,7 @@ print(cfg)
 
 -- create result directory
 os.execute(('mkdir -p %s'):format(opt.resultDir))
+
 
 -- system configuration
 torch.setdefaulttensortype('torch.FloatTensor')
@@ -104,7 +105,32 @@ function prepareValidationBatch(training_data, nExamples, w, h)
 end
 
 
+function generateReport(out_dir, step, confusion)
+  local file = io.open(string.format('%s/report.html', out_dir),'w')
+  file:write(string.format([[
+    <!DOCTYPE html>
+    <html>
+    <body>
+    <title>%s - %s</title>
+    <img src="progress.png">
+    ]], out_dir, step))
+
+  -- write confusion matrix
+  file:write'<pre>\n'
+  file:write'Confusion Matrix\n'
+  file:write(tostring(confusion)..'\n')
+  file:write'</pre>\n'
+
+  file:write'</body></html>'
+  file:close()
+end
+
+
 function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
+  local BATCH_SIZE = 75
+  local TEST_INTERVAL = 100
+  local SNAPSHOT_INTERVAL = 10000
+
   local w,h = 122,122
 
   -- load training data
@@ -115,7 +141,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
   -- create model, expected 8x8 output plane size currently hard coded
   local _1, layers, _2, _3 = dofile(model_path)
   local net = create_simple_pretraining_net(layers, 8 * 8 * layers[#layers].filters, class_count)
-  
+
   -- create criterion
   local criterion = nn.ClassNLLCriterion()
 
@@ -130,20 +156,19 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
   -- prepare optimization method
 
-  local optimState = {
-    learningRate = opt.lr,
+  --[[local optimState = {
+    learningRate = 1E-3,
     weightDecay = 1E-5,
     momentum = 0.6,
     learningRateDecay = 0
   }
-  optimMethod = optim.sgd
+  optimMethod = optim.sgd]]
 
---[[  local optimState = {
-    learningRate = opt.lr,
+  local optimState = {
     beta1 = 0.9,      -- first moment coefficient
     beta2 = 0.999     -- second moment coefficient
   }
-  local optimMethod = optim.adam]]
+  local optimMethod = optim.adam
 
   local function randomizeOffsets()
     local offsets = {}
@@ -155,8 +180,9 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
   -- generate inital offsets
   local offsets = randomizeOffsets()
-
-  local BATCH_SIZE = 75
+  local confusion = optim.ConfusionMatrix(class_count)
+  local stats = { train = {}, valid = {} }
+  confusion:zero()
 
   local function lossAndGradient(x)
     if x ~= weights then
@@ -167,7 +193,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
     local i = 0
     local loss = 0
-    BATCH_SIZE = 5
+    BATCH_SIZE = 75
     start_class=1
     for start_class=1,#offsets,BATCH_SIZE do
       -- prepare batch
@@ -176,6 +202,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
       -- forward & backward pass
       local net_output = net:forward(X)
+      confusion:batchAdd(net_output, Y)
       loss = loss + criterion:forward(net_output, Y)
       net:backward(X, criterion:backward(net_output, Y))
 
@@ -185,25 +212,92 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
     return loss / i, gradient
   end
 
+  local learn_schedue =
+  {
+    --  start,     end,     LR,     WD
+      {     1,   15000,   1e-3,   5e-4 },
+      { 15001,   25000,   5e-4,   5e-4 },
+      { 25001,   40000,   1e-4,      0 },
+      { 40001,   45000,   5e-5,      0 },
+      { 45001,     1e8,   1e-6,      0 }
+  }
+
+  local function setLearnParams(step, optim_state)
+    for _,row in ipairs(learn_schedue) do
+      if step >= row[1] and step <= row[2] then
+        optim_state.learningRate = row[3]
+        optim_state.weightDecay = row[4]
+      end
+    end
+  end
+
+  local function plotProgress(stats)
+    local fn = string.format('%s/progress.png', opt.resultDir)
+    gnuplot.pngfigure(fn)
+    gnuplot.title('Traning progress over time')
+
+    local xs = torch.range(1, #stats.train)
+
+    local train = torch.Tensor(stats.train)
+    local valid = torch.Tensor(stats.valid)
+
+    gnuplot.plot(
+      { 'train', train[{{},1}], train[{{},2}], '-' },
+      { 'valid', valid[{{},1}], valid[{{},2}], '-' }
+    )
+
+    --gnuplot.axis({ 0, train[{stats.train,1}], 0, 10 })
+    gnuplot.xlabel('iteration')
+    gnuplot.ylabel('loss')
+
+    gnuplot.plotflush()
+  end
+
   -- main training loop
-  for i=1,1000 do
+  for i=1,50000 do
     if i%500 == 0 then
       randomizeOffsets()
     end
 
     net:evaluate()
 
+    setLearnParams(i, optimState)
+
     local timer = torch.Timer()
     local _, loss = optimMethod(lossAndGradient, weights, optimState)
     local time = timer:time().real
+    table.insert(stats.train, { i, loss[1] })
     print(string.format('[Training] %d: loss: %f', i, loss[1]))
 
     -- check test interval
-    if i%100 == 0 then
-      local X,Y = prepareValidationBatch(trainig_data, 75, w, h)
-      X,Y = X:cuda(),Y:cuda()
-      local test_loss = criterion:forward(net:forward(X), Y)
-      print(string.format('[Test] %d: loss: %f', i, test_loss))
+    if i%TEST_INTERVAL == 0 then
+
+      local valid_loss = 0
+      local TEST_BATCH_COUNT = 10
+      for j=1,TEST_BATCH_COUNT do
+        local X,Y = prepareValidationBatch(trainig_data, 75, w, h)
+        X,Y = X:cuda(),Y:cuda()
+        local net_output = net:forward(X)
+        valid_loss = valid_loss + criterion:forward(net_output, Y)
+      end
+      valid_loss = valid_loss / TEST_BATCH_COUNT
+      table.insert(stats.valid, { i, valid_loss })
+      confusion:updateValids()
+      plotProgress(stats)
+      generateReport(opt.resultDir, i, confusion)
+
+      print(string.format('[Test] %d: loss: %f', i, valid_loss))
+      confusion:zero()
+    end
+
+    if i%SNAPSHOT_INTERVAL == 0 then
+      local snapshot_fn = string.format('%s/snapshot_%07d.t7', opt.resultDir, i)
+      torch.save(snapshot_fn, {
+        version = 0,
+        weights = weights,
+        options = opt,
+        stats = stats
+      })
     end
 
   end
@@ -275,7 +369,6 @@ local function extract_receptive_fields(cfg, model_path, training_data_filename)
     table.insert(class_dir_names, dir_name)
   end
 
-  -- TODO: build and store new ground-truth data
   local data = {
     ground_truth = {},
     training_set = {},
