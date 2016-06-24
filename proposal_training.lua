@@ -127,7 +127,7 @@ end
 
 
 function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
-  local BATCH_SIZE = 75
+  local BATCH_SIZE = 50
   local TEST_INTERVAL = 100
   local SNAPSHOT_INTERVAL = 10000
 
@@ -156,19 +156,19 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
   -- prepare optimization method
 
-  --[[local optimState = {
+  local optimState = {
     learningRate = 1E-3,
     weightDecay = 1E-5,
-    momentum = 0.6,
+    momentum = 0.9,
     learningRateDecay = 0
   }
-  optimMethod = optim.sgd]]
+  optimMethod = optim.sgd
 
-  local optimState = {
+  --[[local optimState = {
     beta1 = 0.9,      -- first moment coefficient
     beta2 = 0.999     -- second moment coefficient
   }
-  local optimMethod = optim.adam
+  local optimMethod = optim.adam]]
 
   local function randomizeOffsets()
     local offsets = {}
@@ -212,7 +212,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
     return loss / i, gradient
   end
 
-  local learn_schedue =
+  local learn_schedue_adam =
   {
     --  start,     end,     LR,     WD
       {     1,   15000,   1e-3,   5e-4 },
@@ -222,7 +222,18 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
       { 45001,     1e8,   1e-6,      0 }
   }
 
-  local function setLearnParams(step, optim_state)
+
+  local learn_schedue_sgd =
+  {
+    --  start,     end,     LR,     WD
+      {     1,    8000,   1e-1,   5e-4 },
+      {  8001,   16000,   1e-2,   5e-4 },
+      { 16001,   24000,   5e-3,      0 },
+      { 24001,   35000,   1e-3,      0 },
+      { 35001,     1e8,   1e-5,      0 }
+  }
+
+  local function setLearnParams(learn_schedue, step, optim_state)
     for _,row in ipairs(learn_schedue) do
       if step >= row[1] and step <= row[2] then
         optim_state.learningRate = row[3]
@@ -259,9 +270,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
       randomizeOffsets()
     end
 
-    net:evaluate()
-
-    setLearnParams(i, optimState)
+    setLearnParams(learn_schedue_sgd, i, optimState)
 
     local timer = torch.Timer()
     local _, loss = optimMethod(lossAndGradient, weights, optimState)
@@ -271,9 +280,9 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
     -- check test interval
     if i%TEST_INTERVAL == 0 then
-
       local valid_loss = 0
       local TEST_BATCH_COUNT = 10
+      net:evaluate()
       for j=1,TEST_BATCH_COUNT do
         local X,Y = prepareValidationBatch(trainig_data, 75, w, h)
         X,Y = X:cuda(),Y:cuda()

@@ -58,7 +58,7 @@ function create_simple_pretraining_net(layers, conv_output_count, class_count, f
   local conv_outputs = create_conv_layers(layers, input)
 
   -- add alexnet like FC layers
-  fc_size = fc_size or 2048
+  fc_size = fc_size or 512
   local classifier = nn.Sequential()
 
   classifier:add(nn.View(conv_output_count))

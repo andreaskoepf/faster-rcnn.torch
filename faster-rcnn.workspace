@@ -2,7 +2,7 @@
 <CodeLite_Workspace Name="faster-rcnn" Database="faster-rcnn.tags">
   <Project Name="faster-rcnn" Path="faster-rcnn.project" Active="Yes"/>
   <BuildMatrix>
-    <WorkspaceConfiguration Name="Debug" Selected="yes">
+    <WorkspaceConfiguration Name="Debug" Selected="no">
       <Environment/>
       <Project Name="faster-rcnn" ConfigName="Debug"/>
     </WorkspaceConfiguration>
