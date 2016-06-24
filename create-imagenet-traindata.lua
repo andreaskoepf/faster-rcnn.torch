@@ -1,5 +1,5 @@
 -- specify the base path of the ILSVRC2015 dataset: 
-ILSVRC2015_BASE_DIR = '/data/imagenet/ILSVRC2015/'
+
 
 require 'lfs'
 require 'LuaXML'      -- if missing use luarocks install LuaXML
@@ -9,6 +9,23 @@ require 'Rect'
 local ground_truth = {}
 local class_names = {}
 local class_index = {}
+
+-- command line options
+cmd = torch.CmdLine()
+cmd:addTime()
+
+cmd:text()
+cmd:text('Load ILSVRC2015')
+cmd:option('-prefix', '/data', 'set dataset prefix')
+cmd:option('-path', 'ILSVRC2015/', 'set ILSVRC2015_BASE_DIR')
+
+cmd:text()
+
+print('Command line args:')
+local opt = cmd:parse(arg or {})
+print(opt)
+
+ILSVRC2015_BASE_DIR = opt.prefix .. opt.path
 
 function import_file(anno_base, data_base, fn, name_table)
   local x = xml.load(fn)

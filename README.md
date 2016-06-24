@@ -9,7 +9,7 @@ Began experimenting with ImageNet: create-imagenet-traindat.lua can be used to c
 
 ## Todo:
 - [!] regularly evaluate net during traning to compute test-set loss
-- generate training graph with [gnuplot](https://github.com/torch/gnuplot)
+- generate training/test graph with [gnuplot](https://github.com/torch/gnuplot)
 - add final per class non-maximum suppression to generate final proposals (already included but eval code rewrite still pending)
 - remove hard coded path, create full set of command line options
 - add parameters to separately enable/disable training of bounding box proposal-network and fine-tuning + classification.

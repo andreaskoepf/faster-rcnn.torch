@@ -49,7 +49,7 @@ function Localizer:inputToFeatureRect(rect, layer_index)
     rect = rect:offset(l.padW, l.padH)
     
     -- reduce size, keep only filters that fit completely into the rect (valid convolution)
-    rect.minX = rect.minX / l.dH
+    rect.minX = rect.minX / l.dW
     rect.minY = rect.minY / l.dH
     if (rect.maxX-l.kW) % l.dW == 0 then
       rect.maxX = math.max((rect.maxX-l.kW)/l.dW + 1, rect.minX+1)
@@ -57,7 +57,7 @@ function Localizer:inputToFeatureRect(rect, layer_index)
       rect.maxX = math.max(math.ceil((rect.maxX-l.kW) / l.dW) + 1, rect.minX+1)
     end
     if (rect.maxY-l.kH) % l.dH == 0 then
-      rect.maxY = math.max((rect.maxY-l.kH)/l.dW + 1, rect.minY+1)
+      rect.maxY = math.max((rect.maxY-l.kH)/l.dH + 1, rect.minY+1)
     else
       rect.maxY = math.max(math.ceil((rect.maxY-l.kH) / l.dH) + 1, rect.minY+1)
     end
@@ -71,8 +71,8 @@ function Localizer:featureToInputRect(minX, minY, maxX, maxY, layer_index)
   for i=layer_index,1,-1 do
     local l = self.layers[i]
     minX = minX * l.dW - l.padW
-    minY = minY * l.dH - l.padW
-    maxX = maxX * l.dW - l.padH + l.kW - l.dW
+    minY = minY * l.dH - l.padH
+    maxX = maxX * l.dW - l.padW + l.kW - l.dW
     maxY = maxY * l.dH - l.padH + l.kH - l.dH
   end
   return Rect.new(minX, minY, maxX, maxY)
