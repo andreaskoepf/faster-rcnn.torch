@@ -7,7 +7,7 @@ function create_conv_layers(layers, input)
     if bn then
       container:add(nn.SpatialBatchNormalization(nOutputPlane, 1e-3))
     end
-    container:add(nn.PReLU())
+    container:add(nn.ReLU(true))
     if dropout and dropout > 0 then
       container:add(nn.SpatialDropout(dropout))
     end
@@ -64,12 +64,15 @@ function create_simple_pretraining_net(layers, conv_output_count, class_count, f
   classifier:add(nn.View(conv_output_count))
   classifier:add(nn.Dropout(0.5))
   classifier:add(nn.Linear(conv_output_count, fc_size))
-  classifier:add(nn.ReLU(true))
+  classifier:add(nn.ELU())
+  classifier:add(nn.BatchNormalization(fc_size, 1e-3))
 
   classifier:add(nn.Dropout(0.5))
   classifier:add(nn.Linear(fc_size, fc_size))
-  classifier:add(nn.ReLU(true))
+  classifier:add(nn.ELU())
+  classifier:add(nn.BatchNormalization(fc_size, 1e-3))
 
+  classifier:add(nn.Dropout(0.5))
   classifier:add(nn.Linear(fc_size, class_count))
   classifier:add(nn.LogSoftMax())
 
