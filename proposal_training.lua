@@ -20,6 +20,7 @@ cmd:option('-cfg', 'config/imagenet.lua', 'configuration file')
 cmd:option('-model', 'models/vgg_small.lua', 'model factory file')
 cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix')
 cmd:option('-train', 'receptive_fields_data.t7', 'training data file name')
+cmd:option('-opti', 'sgd', 'Optimizer')
 cmd:option('-resultDir', 'proposal_logs', 'Folder for storing all result. (training process ect)')
 
 cmd:text('=== Misc ===')
@@ -169,21 +170,44 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
   -- prepare optimization method
 
-  local optimState = {
-    learningRate = 1E-3,
-    weightDecay = 1E-5,
-    momentum = 0.9,
-    nesterov = true,
-    learningRateDecay = 0,
-    dampening = 0.0
-  }
-  optimMethod = optim.sgd
-
-  --[[local optimState = {
-    beta1 = 0.9,      -- first moment coefficient
-    beta2 = 0.999     -- second moment coefficient
-  }
-  local optimMethod = optim.adam]]
+  local optim_state, optim_method, learn_schedule
+  if opt.opti == 'sgd' then
+    optim_state = {
+      learningRate = 1E-3,
+      weightDecay = 1E-5,
+      momentum = 0.8,
+      nesterov = true,
+      learningRateDecay = 0,
+      dampening = 0.0
+    }
+    optim_method = optim.sgd
+    learn_schedule =
+    {
+      --  start,     end,     LR,     WD
+        {     1,    8000,   1e-1,   5e-4 },
+        {  8001,   16000,   1e-2,   1e-4 },
+        { 16001,   24000,   5e-3,   5e-5 },
+        { 24001,   35000,   1e-4,   1e-5 },
+        { 35001,     1e8,   1e-5,      0 }
+    }
+  elseif opt.opti == 'adam' then
+    optim_state = {
+      beta1 = 0.9,      -- first moment coefficient
+      beta2 = 0.999     -- second moment coefficient
+    }
+    optim_method = optim.adam
+    learn_schedule =
+    {
+      --  start,     end,     LR,     WD
+        {     1,    8000,   1e-3,   5e-4 },
+        {  8001,   16000,   5e-4,   1e-4 },
+        { 16001,   24000,   1e-4,   5e-5 },
+        { 24001,   35000,   5e-5,   1e-5 },
+        { 35001,     1e8,   1e-6,      0 }
+    }
+  else
+    error('unsupported optimization method')
+  end
 
   local function randomizeOffsets()
     local offsets = {}
@@ -228,29 +252,9 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
     return loss / i, gradient
   end
 
-  local learn_schedue_adam =
-  {
-    --  start,     end,     LR,     WD
-      {     1,   15000,   1e-3,   5e-4 },
-      { 15001,   25000,   5e-4,   5e-4 },
-      { 25001,   40000,   1e-4,      0 },
-      { 40001,   45000,   5e-5,      0 },
-      { 45001,     1e8,   1e-6,      0 }
-  }
 
-
-  local learn_schedue_sgd =
-  {
-    --  start,     end,     LR,     WD
-      {     1,    8000,   1e-1,   5e-4 },
-      {  8001,   16000,   1e-2,   1e-4 },
-      { 16001,   24000,   5e-3,   5e-5 },
-      { 24001,   35000,   1e-4,   1e-5 },
-      { 35001,     1e8,   1e-5,      0 }
-  }
-
-  local function setLearnParams(learn_schedue, step, optim_state)
-    for _,row in ipairs(learn_schedue) do
+  local function setLearnParams(learn_schedule, step, optim_state)
+    for _,row in ipairs(learn_schedule) do
       if step >= row[1] and step <= row[2] then
         optim_state.learningRate = row[3]
         optim_state.weightDecay = row[4]
@@ -286,10 +290,10 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
       randomizeOffsets()
     end
 
-    setLearnParams(learn_schedue_sgd, i, optimState)
+    setLearnParams(learn_schedule, i, optim_state)
 
     local timer = torch.Timer()
-    local _, loss = optimMethod(lossAndGradient, weights, optimState)
+    local _, loss = optim_method(lossAndGradient, weights, optim_state)
     local time = timer:time().real
     table.insert(stats.train, { i, loss[1] })
     print(string.format('[Training] %d: loss: %f', i, loss[1]))
