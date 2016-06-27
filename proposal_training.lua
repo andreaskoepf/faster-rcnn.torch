@@ -20,6 +20,7 @@ cmd:option('-cfg', 'config/imagenet.lua', 'configuration file')
 cmd:option('-model', 'models/vgg_small.lua', 'model factory file')
 cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix')
 cmd:option('-train', 'receptive_fields_data.t7', 'training data file name')
+cmd:option('-opti', 'sgd', 'Optimizer')
 cmd:option('-resultDir', 'proposal_logs', 'Folder for storing all result. (training process ect)')
 
 cmd:text('=== Misc ===')
@@ -49,7 +50,15 @@ if opt.seed ~= nil and opt.seed ~= 0 then
 end
 
 
-function normalizeImageInplace(img)
+function loadImage(fn, augment)
+  local img = image.load(fn)
+
+  if augment then
+    if math.random() > 0.5 then
+      img = image.hflip(img)
+    end
+  end
+
   for i = 1,img:size(1) do
     img[i]:add(-img[i]:mean())
     local s = img[i]:std()
@@ -57,6 +66,8 @@ function normalizeImageInplace(img)
       img[i]:div(s)
     end
   end
+
+  return img
 end
 
 
@@ -76,8 +87,7 @@ function prepareTrainingBatch(training_data, offsets, start_class, end_class, w,
 
     local fn = training_data.training_by_class[i][offsets[i]]
 
-    local img = load_image(fn, 'yuv')
-    normalizeImageInplace(img)
+    local img = loadImage(fn, true)
     X[j] = img
     Y[j] = i
     j = j + 1
@@ -95,9 +105,7 @@ function prepareValidationBatch(training_data, nExamples, w, h)
     -- sample from validaten set
     local j = torch.random(#training_data.validation_set)
     local fn = training_data.validation_set[j]
-    local img = load_image(fn, 'yuv')
-    normalizeImageInplace(img)
-    X[i] = img
+    X[i] = loadImage(fn, false)
     Y[i] = training_data.ground_truth[fn].class_index
   end
 
@@ -105,7 +113,7 @@ function prepareValidationBatch(training_data, nExamples, w, h)
 end
 
 
-function generateReport(out_dir, step, confusion)
+function generateReport(out_dir, step, train_confusion, valid_confusion)
   local file = io.open(string.format('%s/report.html', out_dir),'w')
   file:write(string.format([[
     <!DOCTYPE html>
@@ -117,8 +125,13 @@ function generateReport(out_dir, step, confusion)
 
   -- write confusion matrix
   file:write'<pre>\n'
-  file:write'Confusion Matrix\n'
-  file:write(tostring(confusion)..'\n')
+  file:write'Training Confusion Matrix\n'
+  file:write(tostring(train_confusion)..'\n')
+  file:write'</pre>\n'
+
+  file:write'<pre>\n'
+  file:write'Validation Confusion Matrix\n'
+  file:write(tostring(valid_confusion)..'\n')
   file:write'</pre>\n'
 
   file:write'</body></html>'
@@ -129,14 +142,15 @@ end
 function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
   local BATCH_SIZE = 50
   local TEST_INTERVAL = 100
-  local SNAPSHOT_INTERVAL = 10000
+  local FULL_TEST_INTERVAL = 2000
+  local SNAPSHOT_INTERVAL = 5000
 
   local w,h = 122,122
 
   -- load training data
-  local trainig_data = torch.load(training_data_filename)
+  local training_data = torch.load(training_data_filename)
 
-  local class_count = #trainig_data.training_by_class
+  local class_count = #training_data.training_by_class
 
   -- create model, expected 8x8 output plane size currently hard coded
   local _1, layers, _2, _3 = dofile(model_path)
@@ -156,33 +170,60 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
   -- prepare optimization method
 
-  local optimState = {
-    learningRate = 1E-3,
-    weightDecay = 1E-5,
-    momentum = 0.9,
-    learningRateDecay = 0
-  }
-  optimMethod = optim.sgd
-
-  --[[local optimState = {
-    beta1 = 0.9,      -- first moment coefficient
-    beta2 = 0.999     -- second moment coefficient
-  }
-  local optimMethod = optim.adam]]
+  local optim_state, optim_method, learn_schedule
+  if opt.opti == 'sgd' then
+    optim_state = {
+      learningRate = 1E-3,
+      weightDecay = 1E-5,
+      momentum = 0.8,
+      nesterov = true,
+      learningRateDecay = 0,
+      dampening = 0.0
+    }
+    optim_method = optim.sgd
+    learn_schedule =
+    {
+      --  start,     end,     LR,     WD
+        {     1,    8000,   1e-1,   5e-4 },
+        {  8001,   16000,   1e-2,   1e-4 },
+        { 16001,   24000,   5e-3,   5e-5 },
+        { 24001,   35000,   1e-4,   1e-5 },
+        { 35001,     1e8,   1e-5,      0 }
+    }
+  elseif opt.opti == 'adam' then
+    optim_state = {
+      beta1 = 0.9,      -- first moment coefficient
+      beta2 = 0.999     -- second moment coefficient
+    }
+    optim_method = optim.adam
+    learn_schedule =
+    {
+      --  start,     end,     LR,     WD
+        {     1,    8000,   1e-3,   5e-4 },
+        {  8001,   16000,   5e-4,   1e-4 },
+        { 16001,   24000,   1e-4,   5e-5 },
+        { 24001,   35000,   5e-5,   1e-5 },
+        { 35001,     1e8,   1e-6,      0 }
+    }
+  else
+    error('unsupported optimization method')
+  end
 
   local function randomizeOffsets()
     local offsets = {}
     for i=1,class_count do
-      table.insert(offsets, torch.random(#trainig_data.training_by_class[i]))
+      table.insert(offsets, torch.random(#training_data.training_by_class[i]))
     end
     return offsets
   end
 
   -- generate inital offsets
   local offsets = randomizeOffsets()
-  local confusion = optim.ConfusionMatrix(class_count)
+  local train_confusion = optim.ConfusionMatrix(class_count)
+  local valid_confusion = optim.ConfusionMatrix(class_count)
   local stats = { train = {}, valid = {} }
-  confusion:zero()
+  train_confusion:zero()
+  valid_confusion:zero()
 
   local function lossAndGradient(x)
     if x ~= weights then
@@ -193,16 +234,15 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
     local i = 0
     local loss = 0
-    BATCH_SIZE = 75
-    start_class=1
+    local BATCH_SIZE = 75
     for start_class=1,#offsets,BATCH_SIZE do
       -- prepare batch
-      local X,Y = prepareTrainingBatch(trainig_data, offsets, start_class, math.min(start_class + BATCH_SIZE-1, #offsets), w, h)
+      local X,Y = prepareTrainingBatch(training_data, offsets, start_class, math.min(start_class + BATCH_SIZE-1, #offsets), w, h)
       X,Y = X:cuda(),Y:cuda()
 
       -- forward & backward pass
       local net_output = net:forward(X)
-      confusion:batchAdd(net_output, Y)
+      train_confusion:batchAdd(net_output, Y)
       loss = loss + criterion:forward(net_output, Y)
       net:backward(X, criterion:backward(net_output, Y))
 
@@ -212,29 +252,9 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
     return loss / i, gradient
   end
 
-  local learn_schedue_adam =
-  {
-    --  start,     end,     LR,     WD
-      {     1,   15000,   1e-3,   5e-4 },
-      { 15001,   25000,   5e-4,   5e-4 },
-      { 25001,   40000,   1e-4,      0 },
-      { 40001,   45000,   5e-5,      0 },
-      { 45001,     1e8,   1e-6,      0 }
-  }
 
-
-  local learn_schedue_sgd =
-  {
-    --  start,     end,     LR,     WD
-      {     1,    8000,   1e-1,   5e-4 },
-      {  8001,   16000,   1e-2,   5e-4 },
-      { 16001,   24000,   5e-3,      0 },
-      { 24001,   35000,   1e-3,      0 },
-      { 35001,     1e8,   1e-5,      0 }
-  }
-
-  local function setLearnParams(learn_schedue, step, optim_state)
-    for _,row in ipairs(learn_schedue) do
+  local function setLearnParams(learn_schedule, step, optim_state)
+    for _,row in ipairs(learn_schedule) do
       if step >= row[1] and step <= row[2] then
         optim_state.learningRate = row[3]
         optim_state.weightDecay = row[4]
@@ -270,33 +290,59 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
       randomizeOffsets()
     end
 
-    setLearnParams(learn_schedue_sgd, i, optimState)
+    setLearnParams(learn_schedule, i, optim_state)
 
     local timer = torch.Timer()
-    local _, loss = optimMethod(lossAndGradient, weights, optimState)
+    local _, loss = optim_method(lossAndGradient, weights, optim_state)
     local time = timer:time().real
     table.insert(stats.train, { i, loss[1] })
     print(string.format('[Training] %d: loss: %f', i, loss[1]))
 
     -- check test interval
+    if i%FULL_TEST_INTERVAL == 0 then
+      valid_confusion:zero()
+
+      net:evaluate()
+
+      -- use all validation images
+      local BATCH_SIZE = 75
+      local X = torch.FloatTensor(BATCH_SIZE, 3, h, w)
+      local Y = torch.LongTensor(BATCH_SIZE)
+      for i=1,#training_data.validation_set,BATCH_SIZE do
+        for j=1,BATCH_SIZE do
+          if i+j > #training_data.validation_set then break end
+          local fn = training_data.validation_set[i+j]
+          X[j] = loadImage(fn, false)
+          Y[j] = training_data.ground_truth[fn].class_index
+        end
+
+        local X_,Y_ = X:cuda(),Y:cuda()
+        local net_output = net:forward(X_)
+        valid_confusion:batchAdd(net_output, Y_)
+      end
+
+      valid_confusion:updateValids()
+    end
+
     if i%TEST_INTERVAL == 0 then
       local valid_loss = 0
       local TEST_BATCH_COUNT = 10
       net:evaluate()
       for j=1,TEST_BATCH_COUNT do
-        local X,Y = prepareValidationBatch(trainig_data, 75, w, h)
+        local X,Y = prepareValidationBatch(training_data, 75, w, h)
         X,Y = X:cuda(),Y:cuda()
         local net_output = net:forward(X)
         valid_loss = valid_loss + criterion:forward(net_output, Y)
       end
       valid_loss = valid_loss / TEST_BATCH_COUNT
       table.insert(stats.valid, { i, valid_loss })
-      confusion:updateValids()
+
       plotProgress(stats)
-      generateReport(opt.resultDir, i, confusion)
+      train_confusion:updateValids()
+      generateReport(opt.resultDir, i, train_confusion, valid_confusion)
 
       print(string.format('[Test] %d: loss: %f', i, valid_loss))
-      confusion:zero()
+      train_confusion:zero()
     end
 
     if i%SNAPSHOT_INTERVAL == 0 then
@@ -343,7 +389,7 @@ end
 --[[
 function train_receptive_fields(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
   -- load training data
-  local trainig_file = torch.load(training_data_filename)
+  local training_file = torch.load(training_data_filename)
 
   -- create network
   local model, weights, gradient, training_stats = load_model(cfg, model_path, network_filename, true)
