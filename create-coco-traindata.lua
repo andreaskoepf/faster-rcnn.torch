@@ -32,9 +32,9 @@ function read_instances(fn)
           class_index[class_name] = #class_names 
         end 
 
-        -- Order of rectangle corners: maxY, minY, maxX, minX
+        -- Order of rectangle corners in Rect.lua: minX, minY, maxX, maxY (in coco annotations: x, y, width, height)
         local roi_entry = {
-          rect = Rect.new(m.annotations[i].bbox[2]+m.annotations[i].bbox[4], m.annotations[i].bbox[2], m.annotations[i].bbox[1]+m.annotations[i].bbox[3], m.annotations[i].bbox[1]),
+          rect = Rect.new(m.annotations[i].bbox[1], m.annotations[i].bbox[2], m.annotations[i].bbox[1]+m.annotations[i].bbox[3], m.annotations[i].bbox[2]+m.annotations[i].bbox[4]),
           class_name = class_name,
           class_index = class_index[class_name]
         }
