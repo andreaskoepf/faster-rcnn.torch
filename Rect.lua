@@ -11,10 +11,10 @@ local Rect = torch.class('Rect')
 
 function Rect:__init(minX, minY, maxX, maxY)
   if type(minX) == 'table' then
-    self.minX = minx.minX
-    self.minY = minx.minY
-    self.maxX = minx.maxX
-    self.maxY = minx.maxY
+    self.minX = minX.minX
+    self.minY = minX.minY
+    self.maxX = minX.maxX
+    self.maxY = minX.maxY
   else
     self.minX = minX
     self.minY = minY

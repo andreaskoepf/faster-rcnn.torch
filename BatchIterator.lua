@@ -199,10 +199,20 @@ function BatchIterator:nextTraining(count)
     local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
     local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
 
+    
+    local targNumNeg = 1
+    if #positive>0 then
+      targNumNeg = math.max(cfg.batch_size-#positive,1)
+    end
+    
+    if #positive> cfg.batch_size then
+      targNumNeg = cfg.batch_size/2
+    end
+    
     -- random negative examples
-    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, 1) --20160306 16
+    local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, targNumNeg) --20160306 16
     local count = #positive + #negative
-
+    print(string.format("Generated %d Positive patches and %d negativbe patches from image '%s'. ",#positive, #negative , fn))
     if cfg.nearby_aversion then
       local nearby_negative = {}
       -- add all nearby negative anchors
@@ -249,11 +259,11 @@ function BatchIterator:nextTraining(count)
       for i=1,#rois do
         draw_rectangle(dimg, rois[i].rect, white)
       end
-      image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
+      image.saveJPG(string.format('debug/anchors%d.jpg', self.training.i), dimg)
     end
 
-    table.insert(batch, { img = img, positive = positive, negative = negative })
-    print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
+    table.insert(batch, { img = img, positive = positive, negative = negative, rois = rois })
+   -- print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
     return count
   end
 
@@ -267,7 +277,7 @@ function BatchIterator:nextTraining(count)
       if img_size[2] >= 128 and img_size[3] >= 128 then
         local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
         local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
-        table.insert(batch, { img = img, positive = {}, negative = negative })
+        table.insert(batch, { img = img, positive = {}, negative = negative})
         count = count - #negative
         print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
       end

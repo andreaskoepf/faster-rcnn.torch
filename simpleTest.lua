@@ -7,7 +7,7 @@
 require 'torch'
 require 'image'
 require 'nngraph'
-require 'cunn'
+--require 'cunn'
 
 
 -- get configuration & model
@@ -15,6 +15,18 @@ require 'cunn'
 cfg = dofile('config/imagenet.lua')
 model_factory = dofile('models/pretrained/vgg16_ori.lua')
 model = model_factory(cfg)
+
+print("1")
+print(model.pnet:get(model.pnet:size()))
+print("2")
+print(model.pnet:get(model.pnet:size()-1))
+print("3")
+print(model.pnet:get(model.pnet:size()-2))
+print("4")
+print(model.pnet:get(model.pnet:size()-3))
+print("5")
+print(model.pnet:get(model.pnet:size()-4))
+
 
 print(string.format('Number of nodes in model.pnet: %d', model.pnet:size()))
 --graph.dot(model.pnet.fg, 'pnet', 'pnet')
@@ -51,7 +63,7 @@ print(featureNet)
 lena = image.lena()
 lena = image.scale(lena, 224, 224)
 output_featureNet = featureNet:forward(lena)
-output_seq = seq:forward(lena:cuda())
+--output_seq = seq:forward(lena:cuda())
 
 print('output_featureNet-output_seq:')
 print(torch.norm(output_featureNet:cuda()-output_seq))
@@ -59,9 +71,13 @@ print(torch.norm(output_featureNet:cuda()-output_seq))
 -- Test with random input tensor:
 ----------------------------------
 img = torch.rand(3,200,300)
-outA = featureNet:forward(img)
+outA = featureNet:cuda():forward(img:cuda())
 outB = seq:forward(img:cuda())
 B = outA:cuda() - outB
 print(B:norm())
 assert(B:norm() < 1e-03, "output is not equal!!")
 print("DONE!!")
+
+
+
+

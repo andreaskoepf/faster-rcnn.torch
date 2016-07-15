@@ -1,6 +1,6 @@
 require 'nngraph'
 
-function create_proposal_net(layers, anchor_nets)
+function create_proposal_net(layers, anchor_nets,scales)
   -- define  building block functions first
 
   -- VGG style 3x3 convolution building block
@@ -26,11 +26,14 @@ function create_proposal_net(layers, anchor_nets)
   
   -- creates an anchor network which reduces the input first to 256 dimensions 
   -- and then further to the anchor outputs for 3 aspect ratios 
-  local function AnchorNetwork(nInputPlane, n, kernelWidth)
+  local function AnchorNetwork(nInputPlane, n, kernelWidth,dropout)
     local net = nn.Sequential()
     net:add(nn.SpatialConvolution(nInputPlane, n, kernelWidth,kernelWidth, 1,1))
+    if dropout and dropout > 0 then
+      net:add(nn.SpatialDropout(dropout))
+    end
     net:add(nn.ReLU(true))
-    net:add(nn.SpatialConvolution(n, 3 * (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
+    net:add(nn.SpatialConvolution(n, 3 *scales* (2 + 4), 1, 1))  -- aspect ratios { 1:1, 2:1, 1:2 } x { class, left, top, width, height }
     return net
   end
 
@@ -50,9 +53,9 @@ function create_proposal_net(layers, anchor_nets)
   
   local proposal_outputs = {}
   for i,a in ipairs(anchor_nets) do
-    table.insert(proposal_outputs, AnchorNetwork(layers[a.input].filters, a.n, a.kW)(conv_outputs[a.input]))
+    table.insert(proposal_outputs, AnchorNetwork(layers[a.input].filters, a.n, a.kW,a.dropout)(conv_outputs[a.input]))
   end
-  table.insert(proposal_outputs, conv_outputs[#conv_outputs])
+  table.insert(proposal_outputs, conv_outputs[#conv_outputs]) -- insert feature map for ROI pooling
   
     -- create proposal net module, outputs: anchor net outputs followed by last conv-layer output
   local model = nn.gModule({ input }, proposal_outputs)
@@ -62,6 +65,7 @@ function create_proposal_net(layers, anchor_nets)
       for k,v in pairs(m:findModules(name)) do
         local n = v.kW * v.kH * v.nOutputPlane
         v.weight:normal(0, math.sqrt(2 / n))
+        v.bias:fill(2)
         v.bias:zero()
       end
     end
@@ -111,8 +115,8 @@ function create_classification_net(inputs, class_count, class_layers)
     local function init_module(m)
       for k,v in pairs(m:findModules(name)) do
         local n = v.kW * v.kH * v.nOutputPlane
-        v.weight:normal(0, math.sqrt(2 / n))
-        v.bias:zero()
+        --v.weight:normal(0, math.sqrt(2 / n))
+        v.bias:fill(2)
       end
     end
     module:apply(init_module)
@@ -129,7 +133,7 @@ function create_model(cfg, layers, anchor_nets, class_layers)
   {
     cfg = cfg,
     layers = layers,
-    pnet = create_proposal_net(layers, anchor_nets),
+    pnet = create_proposal_net(layers, anchor_nets,#cfg.scales),
     cnet = create_classification_net(cnet_ninputs, cfg.class_count + 1, class_layers)
   }
   return model

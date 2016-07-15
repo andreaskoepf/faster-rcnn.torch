@@ -331,7 +331,7 @@ function create_training_data(dataset_name, pascal_voc, validation_size,output_f
             class_name = d.classes[d.roidb[i].gt_classes[j]]
           }
                 -- generate path relative to annotation dir and join with data dir
-          local image_path = d:image_path_from_index(image_index_set[i])    
+          local image_path = d:image_path_from_index(image_index_set[i])
           local file_entry = ground_truth[image_path]
           if not file_entry then
             file_entry = { image_file_name = image_path, rois = {} }

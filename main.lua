@@ -32,7 +32,7 @@ cmd:option('-snapshot', 1000, 'snapshot interval')
 cmd:option('-plot', 100, 'plot training progress interval')
 cmd:option('-lr', 1E-4, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
-cmd:option('-opti', 'rmsprop', 'Optimizer')
+cmd:option('-opti', 'sgd', 'Optimizer')
 cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training process ect)')
 
 cmd:text('=== Misc ===')
@@ -117,28 +117,10 @@ function load_model(cfg, model_path, network_filename, cuda)
 
   return model, weights, gradient, training_stats
 end
-
-function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
-  local training_data = load_obj(training_data_filename)
-  local file_names = keys(training_data.ground_truth)
-  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)",
-    training_data.dataset_name,
-    #file_names,
-    #training_data.class_names,
-    #training_data.background_files))
-
-  -- create/load model
-  local model, weights, gradient, training_stats = load_model(cfg, model_path, network_filename, true)
-  if not training_stats then
-    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-  end
-
-  local batch_iterator = BatchIterator.new(model, training_data)
-  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
-
-
+local optimState, optimMethod
+local function resetOptim()
   print '==> configuring optimizer'
-  local optimState, optimMethod
+  
   if opt.opti == 'CG' then
     optimState = {
       maxIter = 10000
@@ -156,7 +138,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   elseif opt.opti == 'sgd' then
     optimState = {
       learningRate = opt.lr,
-      weightDecay = 0.0,
+      weightDecay = 0.0005,
       momentum = 0.9,
       learningRateDecay = 1e-7
     }
@@ -172,19 +154,73 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   else
     error('unknown optimization method')
   end
-  local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
+end 
+function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
+  local training_data = load_obj(training_data_filename)
+  local file_names = keys(training_data.ground_truth)
+  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)",
+    training_data.dataset_name,
+    #file_names,
+    #training_data.class_names,
+    #training_data.background_files))
+  -- create/load model
+  local model, weights_full, gradient_full, training_stats = load_model(cfg, model_path, network_filename, true)
+
+
+  if not training_stats then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
+  end
+  local mode = 1
+  local batch_iterator = BatchIterator.new(model, training_data)
+
+  resetOptim()
+
+  --local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
   --local sgd_state = { learningRate = opt.lr, learningRateDecay= 1e-4,weightDecay = 0.0, momentum = 0.90 }
+  
+  
 
   for i=1,50000 do
-    if i % 5000 == 0 then
-      opt.lr = opt.lr - opt.lr/10
-      optimState.learningRate = opt.lr
-
+    if i % 100 == 0 then
+      resetOptim()
+        
+      if mode == 3 then
+        mode = 4
+      elseif mode == 1 then
+        mode = 3
+      elseif mode == 2 then
+        mode = 3  
+      end
+      
     end
 
     local timer = torch.Timer()
-    local _, loss =optimMethod(eval_objective_grad, weights, optimState)
+    local loss
+    if mode == 1 then
+      print("==> Only the pnet will be optimized")
+      local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.pnet:get(model.pnet:size()))
+      local eval_objective_grad_pnet = create_objective(model, weights_pnet, gradient_pnet, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
+      _, loss = optimMethod(eval_objective_grad_pnet, weights_pnet, optimState)
+    elseif mode == 2 then
+      print("==> Only the cnet will be optimized")
+      local weights_cnet, gradient_cnet = combine_and_flatten_parameters(model.cnet)
+      local eval_objective_grad_cnet = create_objective(model, weights_cnet, gradient_cnet, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
+      _, loss = optimMethod(eval_objective_grad_cnet, weights_cnet, optimState)
+    elseif mode == 3 then
+      print("==> Only the top layers will be optimized not the feature conv blocks")
+      local weights_top, gradient_top = combine_and_flatten_parameters(model.pnet:get(model.pnet:size()),model.cnet)
+      local eval_objective_grad_top = create_objective(model, weights_top , gradient_top , batch_iterator, training_stats,confusion_pcls,confusion_ccls)
+      _, loss = optimMethod(eval_objective_grad_top, weights_top, optimState)
+    elseif mode == 4 then
+      local weights_tune, gradient_tune = combine_and_flatten_parameters(model.pnet:get(model.pnet:size()),model.pnet:get(model.pnet:size()-1),model.cnet)
+      local eval_objective_grad_tune  = create_objective(model, weights_tune , gradient_tune , batch_iterator, training_stats,confusion_pcls,confusion_ccls)
+      print("==> Only the tune layers will be optimized not the feature conv blocks")
+      _, loss = optimMethod(eval_objective_grad_tune, weights_tune, optimState)
+    else
+      local eval_objective_grad_full = create_objective(model, weights_full, gradient_full, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
+      _, loss = optimMethod(eval_objective_grad_full, weights_full, optimState)
+    end
 
     local time = timer:time().real
 
@@ -199,7 +235,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       print(string.format('training pnet confusion: %s',tostring(confusion_pcls)))
       print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
       plot_training_progress(snapshot_prefix, training_stats)
-      --evaluation( model, training_data,rmsprop_state,i)
+
       evaluation( model, training_data,optimState,i)
 
       graph.dot(model.cnet.fg, 'cnet',string.format('%s/cnet_fg',opt.resultDir))
@@ -214,7 +250,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
 
     if i%opt.snapshot == 0 then
       -- save snapshot
-      save_model(string.format('%s/%s_%06d.t7', opt.resultDir,snapshot_prefix, i), weights, opt, training_stats)
+      save_model(string.format('%s/%s_%06d.t7', opt.resultDir,snapshot_prefix, i), weights_full, opt, training_stats)
     end
 
   end
@@ -262,78 +298,85 @@ function evaluation(model, training_data,optimState,epoch)
   -- create detector
   local d = Detector(model)
 
-  for i=1,20 do
+  for i=1,200 do
 
     --print(string.format('[Main:evaluation] iteration: %d',i))
     -- pick random validation image
-    local b = batch_iterator:nextValidation(1)[1]
+    local b = batch_iterator:nextTraining()[1]
     local img = b.img:cuda()
     local matches = d:detect(img)
     --print(matches)
-    if color_space == 'yuv' then
-      img = image.yuv2rgb(img)
-    elseif color_space == 'lab' then
-      img = image.lab2rgb(img)
-    elseif color_space == 'hsv' then
-      img = image.hsv2rgb(img)
-    end
-    -- draw bounding boxes and save image
-    for i,m in ipairs(matches) do
-      draw_rectangle(img, m.r, green)
-    end
-    for ii = 1,#b.rois do
-      draw_rectangle(img, b.rois[ii].rect, white)
-    end
-    local save = opt.resultDir
-    image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
-
-    local base64im_p
-    local base64im_d
-    do
-      os.execute(('openssl base64 -in %s/%sproposal_progress.png -out %s/%s_proposal_progress.base64'):format(save,opt.name,save,opt.name))
-      os.execute(('openssl base64 -in %s/%sdetection_progress.png -out %s/%s_detection_progress.base64'):format(save,opt.name,save,opt.name))
-      local f_p = io.open(string.format('%s/%s_proposal_progress.base64',save,opt.name))
-      local f_d = io.open(string.format('%s/%s_detection_progress.base64',save,opt.name))
-      if f_p then base64im_p = f_p:read'*all' end
-      if f_d then base64im_d = f_d:read'*all' end
-    end
-    local file = io.open(string.format('%s/report.html',save),'w')
-    file:write(string.format([[
-    <!DOCTYPE html>
-    <html>
-    <body>
-    <title>%s - %s</title>
-    <img src="data:image/png;base64,%s">
-    <img src="data:image/png;base64,%s">
-    <h4>optimState:</h4>
-    <table>
-    ]],save,epoch,base64im_p,base64im_d))
-    if optimState then
-      for k,v in pairs(optimState) do
-        if torch.type(v) == 'number' then
-          file:write('<tr><td>'..k..'</td><td>'..v..'</td></tr>\n')
+    if i< 21 then
+      if color_space == 'yuv' then
+        img = image.yuv2rgb(img)
+      elseif color_space == 'lab' then
+        img = image.lab2rgb(img)
+      elseif color_space == 'hsv' then
+        img = image.hsv2rgb(img)
+      end
+      -- draw bounding boxes and save image
+      for i,m in ipairs(matches) do
+        if m.p > 0.8 then
+          draw_rectangle(img, m.r, green)
         end
       end
+      for ii = 1,#b.rois do
+        draw_rectangle(img, b.rois[ii].rect, white)
+      end
+      local save = opt.resultDir
+      image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+  
+      local base64im_p
+      local base64im_d
+      do
+        os.execute(('openssl base64 -in %s/%sproposal_progress.png -out %s/%s_proposal_progress.base64'):format(save,opt.name,save,opt.name))
+        os.execute(('openssl base64 -in %s/%sdetection_progress.png -out %s/%s_detection_progress.base64'):format(save,opt.name,save,opt.name))
+        local f_p = io.open(string.format('%s/%s_proposal_progress.base64',save,opt.name))
+        local f_d = io.open(string.format('%s/%s_detection_progress.base64',save,opt.name))
+        if f_p then base64im_p = f_p:read'*all' end
+        if f_d then base64im_d = f_d:read'*all' end
+      end
+      local file =
+        io.open(string.format('%s/report.html',save),'w')
+      if file then
+        file:write(string.format([[
+        <!DOCTYPE html>
+        <html>
+        <body>
+        <title>%s - %s</title>
+        <img src="data:image/png;base64,%s">
+        <img src="data:image/png;base64,%s">
+        <h4>optimState:</h4>
+        <table>
+        ]],save,epoch,base64im_p,base64im_d))
+        if optimState then
+          for k,v in pairs(optimState) do
+            if torch.type(v) == 'number' then
+              file:write('<tr><td>'..k..'</td><td>'..v..'</td></tr>\n')
+            end
+          end
+        end
+        file:write'<table>\n'
+        for i =1,20 do
+          file:write(string.format('<tr><img src="output%d.jpg" alt="output" width="244" height="244" ></tr>\n',i))
+        end
+        file:write'</table>\n'
+        file:write'<pre>\n'
+        file:write'Training pcls\n'
+        file:write(tostring(confusion_pcls)..'\n')
+        file:write'</pre>\n'
+        file:write'<pre>\n'
+        file:write'Training pcls\n'
+        file:write(tostring(confusion_ccls)..'\n')
+        file:write'</pre>\n'
+        file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_fg','cnet_fg','cnet_fg'))
+        file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_bg','cnet_bg','cnet_bg'))
+        file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_fg','pnet_fg','pnet_fg'))
+        file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_bg','pnet_bg','pnet_bg'))
+        file:write'</body></html>'
+        file:close()
+      end
     end
-    file:write'<table>\n'
-    for i =1,20 do
-      file:write(string.format('<tr><img src="output%d.jpg" alt="output" width="244" height="244" ></tr>\n',i))
-    end
-    file:write'</table>\n'
-    file:write'<pre>\n'
-    file:write'Training pcls\n'
-    file:write(tostring(confusion_pcls)..'\n')
-    file:write'</pre>\n'
-    file:write'<pre>\n'
-    file:write'Training pcls\n'
-    file:write(tostring(confusion_ccls)..'\n')
-    file:write'</pre>\n'
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_fg','cnet_fg','cnet_fg'))
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_bg','cnet_bg','cnet_bg'))
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_fg','pnet_fg','pnet_fg'))
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_bg','pnet_bg','pnet_bg'))
-    file:write'</body></html>'
-    file:close()
   end
 
 end

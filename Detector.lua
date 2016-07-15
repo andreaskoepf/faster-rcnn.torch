@@ -9,12 +9,13 @@ function Detector:__init(model)
   local cfg = model.cfg
   self.model = model
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
-  self.localizer = Localizer.new(model.pnet.outnode.children[5])
+  self.localizer = Localizer.new(model.pnet.outnode.children[#model.pnet.outnode.children])
   self.lsm = nn.LogSoftMax():cuda()
   self.amp = nn.SpatialAdaptiveMaxPooling(cfg.roi_pooling.kw, cfg.roi_pooling.kh):cuda()
 end
 
 function Detector:detect(input)
+  local DEBUG = false
   local cfg = self.model.cfg
   local pnet = self.model.pnet
   local cnet = self.model.cnet
@@ -25,7 +26,6 @@ function Detector:detect(input)
   local m=nn.SoftMax():cuda()
 
   local cnet_input_planes = self.model.layers[#self.model.layers].filters
-
   local input_size = input:size()
   local input_rect = Rect.new(0, 0, input_size[3], input_size[2])
 
@@ -37,8 +37,8 @@ function Detector:detect(input)
   -- analyse network output for non-background classification
   local matches = {}
 
-  local aspect_ratios = 3
-  for i=1,4 do
+  local aspect_ratios =self.anchors.w:size()[2]
+  for i=1,1 do
     local layer = outputs[i]
     local layer_size = layer:size()
     for y=1,layer_size[2] do
@@ -51,18 +51,19 @@ function Detector:detect(input)
           local reg_out = c[{{ofs + 3, ofs + 6}}]
 
           -- classification
-          local c = lsm:forward(cls_out)
+         -- local c = lsm:forward(cls_out)
           --if c[1] > c[2] then
           local c_norm= m:forward(cls_out)
-          --if math.exp(c[1]) > 0.9 then  -- only two classes (foreground and background)
+          if math.exp(c[1]) > 0.5 and math.exp(c[1])> math.exp(c[2]) then  -- only two classes (foreground and background)
 
-          if c_norm[1] > 0.7 then  -- only two classes (foreground and background)
+          --if c_norm[1] >c_norm[2] and c_norm[1]>0.5 then  -- only two classes (foreground and background)
 
             -- regression
             local a_ = self.anchors:get(i,a,y,x)
             local r = Anchors.anchorToInput(a_, reg_out)
             if r:overlaps(input_rect) then
-              table.insert(matches, { p=c_norm[1], a=a_, r=r, l=i })
+              --table.insert(matches, { p=c_norm[1], a=a_, r=r, l=i })
+              table.insert(matches, { p=c[1], a=a_, r=r, l=i })
             end
           end
 
@@ -71,7 +72,9 @@ function Detector:detect(input)
     end
   end
 
-
+  if DEBUG then
+    return matches
+  end
   local winners = {}
 
   if #matches > 0 then
@@ -84,7 +87,7 @@ function Detector:detect(input)
       score[i] = matches[i].p
     end
 
-    local iou_threshold = 0.25 --FIXME =0.25
+    local iou_threshold = 0.25 
     local pick = nms(bb, iou_threshold, score)
     --local pick = nms(bb, iou_threshold, 'area')
     local candidates = {}
@@ -99,7 +102,7 @@ function Detector:detect(input)
     local cinput = torch.CudaTensor(#candidates, cfg.roi_pooling.kw * cfg.roi_pooling.kh * cnet_input_planes)
     for i,v in ipairs(candidates) do
       -- pass through adaptive max pooling operation
-      local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[5])
+      local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[#outputs])
       cinput[i] = amp:forward(pi):view(cfg.roi_pooling.kw * cfg.roi_pooling.kh * cnet_input_planes)
     end
 
@@ -142,8 +145,9 @@ function Detector:detect(input)
       pick:apply(function (x) table.insert(winners, c[x]) end )
 
     end
-
+    --return candidates
   end
-
+  
   return winners
+  --return winners
 end

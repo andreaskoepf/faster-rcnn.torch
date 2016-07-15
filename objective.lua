@@ -3,12 +3,17 @@ require 'BatchIterator'
 require 'Localizer'
 
 function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
+  --print(input_rect)
   local r = localizer:inputToFeatureRect(input_rect)
   -- the use of math.min ensures correct handling of empty rects,
   -- +1 offset for top, left only is conversion from half-open 0-based interval
   local s = feature_layer_output:size()
+  --print(r)
+  --print(s)
+  --io.read()
   r = r:clip(Rect.new(0, 0, s[3], s[2]))
-  local idx = { {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
+  
+  local idx = { {}, { math.min(r.minY + 1, r.maxY), math.max(r.minY + 1, r.maxY) }, { math.min(r.minX + 1, r.maxX),  math.max(r.minX + 1, r.maxX) } }
   return feature_layer_output[idx], idx
 end
 
@@ -16,11 +21,16 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
   local cfg = model.cfg
   local pnet = model.pnet
   local cnet = model.cnet
-
-  local bgclass = cfg.class_count + 1   -- background class
+  collectgarbage()
+  --local bgclass = cfg.class_count + 1   -- background class
+  
+  local bgclass = cfg.backgroundClass or cfg.class_count +1   -- background class
   local anchors = batch_iterator.anchors
-  local localizer = Localizer.new(pnet.outnode.children[5])
-
+  print("create_objective pnet outnode")
+  print(pnet.outnode.children[1].children[1]:graphNodeName())
+  --local localizer = Localizer.new(pnet.outnode.children[#pnet.outnode.children])
+  local localizer = Localizer.new(pnet.outnode.children[1].children[1])
+  
   local softmax = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
   local smoothL1 = nn.SmoothL1Criterion():cuda()
@@ -34,6 +44,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     local i = 1
     while i <= #examples do
       local anchor = examples[i][1]
+      
+      --print(outputs)
       local fmSize = outputs[anchor.layer]:size()
       if anchor.index[2] > fmSize[2] or anchor.index[3] > fmSize[3] then
         table.remove(examples, i)   -- accessing would cause ouf of range exception
@@ -42,7 +54,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
       end
     end
   end
-
+  
   local function lossAndGradient(w)
     if w ~= weights then
       weights:copy(w)
@@ -75,7 +87,6 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
       local p = x.positive        -- get positive and negative anchors examples
       local n = x.negative
-
       -- run forward convolution
       local outputs = pnet:forward(img)
 
@@ -99,6 +110,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
 
       target[{1,1}] = 1
       target[{1,2}] = 0
+      local lambda = 1
       -- process positive set
       for i,x in ipairs(p) do
         local anchor = x[1]
@@ -113,27 +125,29 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         local d = delta_out[idx]
 
         -- foreground/background classification
-        cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 1)
-        local dc = softmax:backward(v[{{1, 2}}], 1)
+        local res = v[{{1, 2}}]
+        cls_loss = cls_loss + softmax:forward(res, torch.ones(res:size()):cuda())
+        local dc = softmax:backward(res, torch.ones(res:size()):cuda())
         d[{{1,2}}]:add(dc)
         clsOutput[{1,1}]=v[1]
         clsOutput[{1,2}]=v[2]
         pnet_confusion:batchAdd(clsOutput, target)
+
         -- box regression
-        local lambda = 1--10
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
+
         reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)* lambda-- * 10
         local dr = smoothL1:backward(reg_out, reg_target)* lambda --* 10
         d[{{3,6}}]:add(dr)
-
+        
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[5])
+        local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-        local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
+        local reg_proposal = Anchors.anchorToInput(anchor,reg_out)-- roi.rect--Rect.new(reg_out[1],reg_out[2],reg_out[3],reg_out[4])--
         table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
       end
-
+      
       target[{1,1}] = 0
       target[{1,2}] = 1
       -- process negative
@@ -146,15 +160,17 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         local v = out[idx]
         local d = delta_out[idx]
 
-        cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
-        local dc = softmax:backward(v[{{1, 2}}], 2)
+        local res = v[{{1, 2}}]
+        local clstarg = torch.ones(res:size())+torch.ones(res:size())
+        cls_loss = cls_loss + softmax:forward(res, clstarg:cuda())
+        local dc = softmax:backward(res, clstarg:cuda())
         d[{{1,2}}]:add(dc)
         clsOutput[{1,1}]=v[1]
         clsOutput[{1,2}]=v[2]
 
         pnet_confusion:batchAdd(clsOutput, target)
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[5])
+        local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
         table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
       end
@@ -184,20 +200,26 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
 
         -- process classification batch
         local coutputs = cnet:forward(cinput)
-
         -- compute classification and regression error and run backward pass
-        local lambda = 10
+        
         local crout = coutputs[1]
-        crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
-        creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
-        local crdelta = smoothL1:backward(crout, crtarget) * lambda
-
+        --print("Output of coutputs")
+        --print(crout)
+        --print(string.format("Positive anchors: %d , Number of roi pool state: %d",#p,#roi_pool_state))
+        if #p<#roi_pool_state then
+            crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
+        end
+        creg_loss = creg_loss + smoothL1:forward(crout, crtarget)
+        local crdelta = smoothL1:backward(crout, crtarget)
+        
         local ccout = coutputs[2]  -- log softmax classification
-
+        
         --criterion ClassNLL
         local loss = cnll:forward(ccout, cctarget)
         ccls_loss = ccls_loss + loss
+        --print(string.format("Ccls_loss: %04f",ccls_loss))
         local ccdelta = cnll:backward(ccout, cctarget)
+
 
         --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
         local ccdelta = softmax:backward(ccout, cctarget)--]]
@@ -208,7 +230,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         -- run backward pass over rois
         for i,x in ipairs(roi_pool_state) do
           amp.indices = x.indices
-          delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
+          delta_outputs[#delta_outputs][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
         end
       end
 
@@ -223,8 +245,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     end
 
     -- scale gradient
-    gradient:div(cls_count)
-
+    gradient:div(cls_count+creg_count)
+    
     local pcls = cls_loss / cls_count     -- proposal classification (bg/fg)
     local preg = reg_loss / reg_count     -- proposal bb regression
     local dcls = ccls_loss / ccls_count   -- detection classification

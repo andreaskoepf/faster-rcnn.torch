@@ -13,15 +13,12 @@ function vgg16_ori(cfg)
   }
 
   local anchor_nets = {
-    { kW=3, n=512, input=5 },   -- input refers to the 'layer' defined above
-    { kW=3, n=256, input=5 },
-    { kW=5, n=256, input=5 },
-    { kW=7, n=256, input=5 }
+    { kW=3, n=512, input=5}   -- input refers to the 'layer' defined above
   }
 
   local class_layers =  {
-    { n=1024, dropout=0.5, batch_norm=true },
-    { n=512, dropout=0.5 }
+    { n=1024, dropout=0.4, batch_norm=true },
+    { n=512, dropout=0.0 }
   }
   model = create_model(cfg, layers, anchor_nets, class_layers)
   model.pnet:get(#layers+1):remove(7)
@@ -36,28 +33,20 @@ function vgg16_ori(cfg)
 
   local counter = 1
   local seq = net:get(1):get(1)
-  print('nn.Sequential part of the net:')
-  print(seq)
+  --print('nn.Sequential part of the net:')
+  --print(seq)
 
   -- Take the spatial convolution weights from the pretrained network
   local name_nn ='nn.SpatialConvolution'
   local name_cudnn ='cudnn.SpatialConvolution'
   
   local v1 = seq:findModules(name_cudnn)
-  print('cudnn.SpatialConvolution nodes:')
-  print(v1)
-  print('number of cudnn.SpatialConvolution nodes (pretrained network):')
-  print(#v1)
+  --print('cudnn.SpatialConvolution nodes:')
+  --print(v1)
+  --print('number of cudnn.SpatialConvolution nodes (pretrained network):')
+  --print(#v1)
 
   for k,v in pairs(model.pnet:findModules(name_nn)) do
-    print('nn.SpatialConvolution node of this net:')
-    print(v)
-    print('Number of weights:')
-    print(v.weight:size())
-    print('Respective cudnn.SpatialConvolution node of pretrained vgg16:')
-    print(v1[counter])
-    print('Number of weights:')
-    print(v1[counter].weight:size())
     v.weight:copy(v1[counter].weight)
     v.bias:copy(v1[counter].bias)
     counter = counter + 1
