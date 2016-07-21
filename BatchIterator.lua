@@ -227,7 +227,7 @@ function BatchIterator:nextTraining(count)
 
     -- debug boxes
     if false then
-      local dimg = img
+      local dimg = img:clone()
       if color_space == 'yuv' then
         dimg = image.yuv2rgb(img)
       elseif color_space == 'lab' then
@@ -237,16 +237,15 @@ function BatchIterator:nextTraining(count)
       end
 
       local red = torch.Tensor({1,0,0})
+      local green = torch.Tensor({0,1,0})
       local white = torch.Tensor({1,1,1})
 
       for i=1,#negative do
         draw_rectangle(dimg, negative[i][1], red)
       end
-      local green = torch.Tensor({0,1,0})
       for i=1,#positive do
         draw_rectangle(dimg, positive[i][1], green)
       end
-
       for i=1,#rois do
         draw_rectangle(dimg, rois[i].rect, white)
       end
