@@ -15,7 +15,7 @@ function create_conv_layers(layers, input)
   end
 
   -- multiple convolution layers followed by a max-pooling layer
-  local function ConvPoolBlock(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, conv_steps)
+  local function ConvPoolBlock(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, conv_steps, pooling)
     local bn = false
     for i=1,conv_steps do
       ConvPReLU(container, nInputPlane, nOutputPlane, kW, kH, padW, padH, dropout, bn)
@@ -23,7 +23,9 @@ function create_conv_layers(layers, input)
       dropout = nil -- only one dropout layer per conv-pool block
       bn = false
     end
-    container:add(nn.SpatialMaxPooling(2, 2, 2, 2):ceil())
+    if pooling == 'max' then
+      container:add(nn.SpatialMaxPooling(2, 2, 2, 2):ceil())
+    end
     return container
   end
 
@@ -33,7 +35,7 @@ function create_conv_layers(layers, input)
   local prev = input
   for i,l in ipairs(layers) do
     local net = nn.Sequential()
-    ConvPoolBlock(net, inputs, l.filters, l.kW, l.kH, l.padW, l.padH, l.dropout, l.conv_steps)
+    ConvPoolBlock(net, inputs, l.filters, l.kW, l.kH, l.padW, l.padH, l.dropout, l.conv_steps, l.pooling)
     inputs = l.filters
     prev = net(prev)
     table.insert(conv_outputs, prev)

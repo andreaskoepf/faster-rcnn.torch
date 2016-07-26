@@ -25,7 +25,7 @@ cmd:option('-resultDir', 'proposal_logs', 'Folder for storing all result. (train
 
 cmd:text('=== Misc ===')
 cmd:option('-threads', 8, 'number of threads')
-cmd:option('-gpuid', 0, 'device ID (CUDA), (use -1 for CPU)')
+cmd:option('-gpuid', 1, 'device ID (CUDA), (use -1 for CPU)')
 cmd:option('-seed', 0, 'random seed (0 = no fixed seed)')
 
 print('Command line args:')
@@ -97,6 +97,23 @@ function prepareTrainingBatch(training_data, offsets, start_class, end_class, w,
 end
 
 
+function prepareTrainingBatch2(training_data, count, w, h)
+  -- random sampling
+  local X = torch.FloatTensor(count, 3, h, w)
+  local Y = torch.LongTensor(count)
+
+  for i=1,count do
+    -- sample from training set
+    local fn = training_data.training_set[torch.random(#training_data.training_set)]
+    local img = loadImage(fn, true)
+    X[i] = img
+    Y[i] = training_data.ground_truth[fn].class_index
+  end
+
+  return X, Y
+end
+
+
 function prepareValidationBatch(training_data, nExamples, w, h)
   local X = torch.FloatTensor(nExamples, 3, h, w)
   local Y = torch.LongTensor(nExamples)
@@ -140,21 +157,21 @@ end
 
 
 function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
-  local BATCH_SIZE = 50
+  local BATCH_SIZE = 20
   local TEST_INTERVAL = 100
   local FULL_TEST_INTERVAL = 2000
   local SNAPSHOT_INTERVAL = 5000
 
-  local w,h = 122,122
+  local w,h = 228,228
 
   -- load training data
   local training_data = torch.load(training_data_filename)
 
-  local class_count = #training_data.training_by_class
+  local class_count = #training_data.training_by_class -- 200
 
-  -- create model, expected 8x8 output plane size currently hard coded
+  -- create model, output plane size currently hard coded
   local _1, layers, _2, _3 = dofile(model_path)
-  local net = create_simple_pretraining_net(layers, 8 * 8 * layers[#layers].filters, class_count)
+  local net = create_simple_pretraining_net(layers, 15 * 15 * layers[#layers].filters, class_count)
 
   -- create criterion
   local criterion = nn.ClassNLLCriterion()
@@ -184,7 +201,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
     learn_schedule =
     {
       --  start,     end,     LR,     WD
-        {     1,    8000,   1e-1,   5e-4 },
+        {     1,    8000,   5e-2,   5e-4 },
         {  8001,   16000,   1e-2,   1e-4 },
         { 16001,   24000,   5e-3,   5e-5 },
         { 24001,   35000,   1e-4,   1e-5 },
@@ -234,10 +251,17 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
     local i = 0
     local loss = 0
-    local BATCH_SIZE = 75
+
     for start_class=1,#offsets,BATCH_SIZE do
       -- prepare batch
-      local X,Y = prepareTrainingBatch(training_data, offsets, start_class, math.min(start_class + BATCH_SIZE-1, #offsets), w, h)
+      local X, Y
+      --if #stats.train % 2 == 0 then
+        -- uniform random
+        X,Y = prepareTrainingBatch2(training_data, BATCH_SIZE, w, h)
+      --[[else
+        -- stratified
+        X,Y = prepareTrainingBatch(training_data, offsets, start_class, math.min(start_class + BATCH_SIZE-1, #offsets), w, h)
+      end]]
       X,Y = X:cuda(),Y:cuda()
 
       -- forward & backward pass
@@ -245,13 +269,14 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
       train_confusion:batchAdd(net_output, Y)
       loss = loss + criterion:forward(net_output, Y)
       net:backward(X, criterion:backward(net_output, Y))
+      collectgarbage()
 
       i = i + 1
     end
+
     gradient:div(i)
     return loss / i, gradient
   end
-
 
   local function setLearnParams(learn_schedule, step, optim_state)
     for _,row in ipairs(learn_schedule) do
@@ -305,7 +330,7 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
       net:evaluate()
 
       -- use all validation images
-      local BATCH_SIZE = 75
+      local BATCH_SIZE = 20
       local X = torch.FloatTensor(BATCH_SIZE, 3, h, w)
       local Y = torch.LongTensor(BATCH_SIZE)
       for i=1,#training_data.validation_set,BATCH_SIZE do
@@ -326,10 +351,10 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
 
     if i%TEST_INTERVAL == 0 then
       local valid_loss = 0
-      local TEST_BATCH_COUNT = 10
+      local TEST_BATCH_COUNT = 50
       net:evaluate()
       for j=1,TEST_BATCH_COUNT do
-        local X,Y = prepareValidationBatch(training_data, 75, w, h)
+        local X,Y = prepareValidationBatch(training_data, 20, w, h)
         X,Y = X:cuda(),Y:cuda()
         local net_output = net:forward(X)
         valid_loss = valid_loss + criterion:forward(net_output, Y)
@@ -358,9 +383,6 @@ function simpleProposalPretraining(cfg, model_path, snapshot_prefix, training_da
   end
 
 end
-
-
-simpleProposalPretraining(cfg, opt.model, 'pretrain_' .. opt.name, opt.train, opt.restore)
 
 
 function load_model(cfg, model_path, network_filename, cuda)
@@ -409,12 +431,16 @@ local function extract_receptive_fields(cfg, model_path, training_data_filename)
 
   local model, weights, gradient, training_stats = load_model(cfg, model_path, nil, true)
 
+  -- debug graph structure
+  -- graph.dot(model.pnet.fg, 'test', 'graph_out')
+
   -- find anchor size
   local anchors = Anchors.new(model.pnet, cfg.scales)
   local localizer = anchors.localizers[1]
 
   local receptive_field_size = localizer:featureToInputRect(0,0,1,1)
   local w,h = receptive_field_size:size()
+  print('receptive field size: ' .. tostring(receptive_field_size))
 
   -- create output directories with class id
   local class_dir_names = {}
@@ -499,4 +525,10 @@ local function extract_receptive_fields(cfg, model_path, training_data_filename)
 
 end
 
+
+-- step 1: extract receptive fields
 --extract_receptive_fields(cfg, opt.model, 'ILSVRC2015_DET.t7')
+
+-- step 2: pretraining
+simpleProposalPretraining(cfg, opt.model, 'pretrain_' .. opt.name, opt.train, opt.restore)
+
