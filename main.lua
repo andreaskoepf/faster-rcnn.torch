@@ -318,42 +318,47 @@ function evaluation(model, training_data,optimState,epoch)
       if f_d then base64im_d = f_d:read'*all' end
     end
     local file = io.open(string.format('%s/report.html',save),'w')
-    file:write(string.format([[
-    <!DOCTYPE html>
-    <html>
-    <body>
-    <title>%s - %s</title>
-    <img src="data:image/png;base64,%s">
-    <img src="data:image/png;base64,%s">
-    <h4>optimState:</h4>
-    <table>
-    ]],save,epoch,base64im_p,base64im_d))
-    if optimState then
-      for k,v in pairs(optimState) do
-        if torch.type(v) == 'number' then
-          file:write('<tr><td>'..k..'</td><td>'..v..'</td></tr>\n')
+    if file == nil then
+      print(string.format('Unable to read %s/report.html!!!',save))
+    else
+      file:write(string.format([[
+      <!DOCTYPE html>
+      <html>
+      <body>
+      <title>%s - %s</title>
+      <img src="data:image/png;base64,%s">
+      <img src="data:image/png;base64,%s">
+      <h4>optimState:</h4>
+      <table>
+      ]],save,epoch,base64im_p,base64im_d))
+      if optimState then
+        for k,v in pairs(optimState) do
+          if torch.type(v) == 'number' then
+            file:write('<tr><td>'..k..'</td><td>'..v..'</td></tr>\n')
+          end
         end
       end
+      file:write'<table>\n'
+      for i =1,20 do
+        file:write(string.format('<tr><img src="output%d.jpg" alt="output" width="244" height="244" ></tr>\n',i))
+      end
+      file:write'</table>\n'
+      file:write'<pre>\n'
+      file:write'Training pcls\n'
+      file:write(tostring(confusion_pcls)..'\n')
+      file:write'</pre>\n'
+      file:write'<pre>\n'
+      file:write'Training ccls\n'
+      file:write(tostring(confusion_ccls)..'\n')
+      file:write'</pre>\n'
+      file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_fg','cnet_fg','cnet_fg'))
+      file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_bg','cnet_bg','cnet_bg'))
+      file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_fg','pnet_fg','pnet_fg'))
+      file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_bg','pnet_bg','pnet_bg'))
+      file:write'</body></html>'
+      file:close()
     end
-    file:write'<table>\n'
-    for i =1,20 do
-      file:write(string.format('<tr><img src="output%d.jpg" alt="output" width="244" height="244" ></tr>\n',i))
-    end
-    file:write'</table>\n'
-    file:write'<pre>\n'
-    file:write'Training pcls\n'
-    file:write(tostring(confusion_pcls)..'\n')
-    file:write'</pre>\n'
-    file:write'<pre>\n'
-    file:write'Training pcls\n'
-    file:write(tostring(confusion_ccls)..'\n')
-    file:write'</pre>\n'
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_fg','cnet_fg','cnet_fg'))
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_bg','cnet_bg','cnet_bg'))
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_fg','pnet_fg','pnet_fg'))
-    file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_bg','pnet_bg','pnet_bg'))
-    file:write'</body></html>'
-    file:close()
+  
   end
 
 end
