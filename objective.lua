@@ -7,8 +7,8 @@ function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
   -- the use of math.min ensures correct handling of empty rects,
   -- +1 offset for top, left only is conversion from half-open 0-based interval
   local s = feature_layer_output:size()
-  r = r:clip(Rect.new(0, 0, s[3], s[2]))
-  local idx = { {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
+  r = r:clip(Rect.new(0, 0, s[4], s[3]))
+  local idx = { 1, {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
   return feature_layer_output[idx], idx
 end
 
@@ -19,10 +19,10 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
   local bgclass = cfg.class_count + 1   -- background class
   local anchors = batch_iterator.anchors
-  local localizer = Localizer.new(pnet.outnode.children[4])
+  local localizer = Localizer.new(pnet.outnode.children[1])
 
   local softmax = nn.CrossEntropyCriterion():cuda()
-  --local cnll = nn.ClassNLLCriterion():cuda()
+  local cnll = nn.ClassNLLCriterion():cuda()
   local smoothL1 = nn.SmoothL1Criterion():cuda()
   --local smoothL1 = nn.MSECriterion():cuda()
   smoothL1.sizeAverage = false
@@ -67,7 +67,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
     local ccls_loss, ccls_count = 0, 0
 
     -- enable dropouts
-    --pnet:training()
+    pnet:training()
     cnet:training()
 
     local batch = batch_iterator:nextTraining()
@@ -114,8 +114,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- foreground/background classification
         cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 1)
-        local dc = softmax:backward(v[{{1, 2}}], 1)
-        d[{{1,2}}]:add(dc)
+        --local dc = softmax:backward(v[{{1, 2}}], 1)
+        --d[{{1,2}}]:add(dc)
 
         pnet_confusion:batchAdd(v[{{1, 2}}]:reshape(1,2), target)
 
@@ -123,15 +123,14 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
         reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda
-        local dr = smoothL1:backward(reg_out, reg_target) * lambda
-        d[{{3,6}}]:add(dr)
+        --local dr = smoothL1:backward(reg_out, reg_target) * lambda
+        --d[{{3,6}}]:add(dr)
 
         -- pass through adaptive max pooling operation
-        --[[local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[#outputs])
+        local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
         local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
         table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
-        ]]
       end
 
       target = torch.Tensor({{0,1}})
@@ -147,23 +146,23 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local d = delta_out[idx]
 
         cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
-        local dc = softmax:backward(v[{{1, 2}}], 2)
-        d[{{1,2}}]:add(dc)
+        --local dc = softmax:backward(v[{{1, 2}}], 2)
+        --d[{{1,2}}]:add(dc)
 
         pnet_confusion:batchAdd(v[{{1, 2}}]:reshape(1,2), target)
         -- pass through adaptive max pooling operation
-        --[[local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
+        local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
         local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-        table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })]]
+        table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
       end
 
       -- fine-tuning STAGE
       -- pass extracted roi-data through classification network
 
       -- create cnet input batch
---      if #roi_pool_state > 0 then
+      if #roi_pool_state > 0 then
 
-      if false then
+        --if false then
         local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
         local cctarget = torch.CudaTensor(#roi_pool_state)
         local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
@@ -208,12 +207,12 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         -- run backward pass over rois
         for i,x in ipairs(roi_pool_state) do
           amp.indices = x.indices
-          delta_outputs[5][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
+          delta_outputs[#delta_outputs][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
         end
       end
 
       -- backward pass of proposal network
-      local gi = pnet:backward(img, delta_outputs)
+      --local gi = pnet:backward(img, delta_outputs)
 
       -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
       reg_count = reg_count + #p
