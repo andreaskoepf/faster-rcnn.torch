@@ -1,4 +1,4 @@
-requFlrire 'torch'
+require 'torch'
 require 'pl'
 require 'lfs'
 require 'optim'
@@ -12,6 +12,8 @@ require 'utilities'
 require 'Anchors'
 require 'BatchIterator'
 require 'objective'
+--require 'objective_onlyPnetCLS'
+--require 'objective_onlyPnetLOC'
 require 'Detector'
 local c = require 'trepl.colorize'
 
@@ -62,6 +64,85 @@ if opt.seed ~= 0 then
   cutorch.manualSeed(opt.seed)
 end
 
+local function averagePrecision(tp,fp,npos)
+
+  -- compute precision/recall
+  fp=torch.cumsum(fp)
+  tp=torch.cumsum(tp)
+
+  local rec=tp/npos
+  local prec=torch.cdiv(tp, (fp+tp+1e-16))
+
+  -- compute average precision
+  local ap= torch.zeros(1)
+  for t=0,1,0.1 do
+    local tmp = prec[rec:ge(t)]
+    local p= 0
+    if tmp:nDimension() > 0 then
+      p= torch.max(tmp)
+    end
+
+    if p < 1 then
+      p=0
+    end
+    ap=ap+p/11
+  end
+  return rec,prec,ap
+end
+
+
+local function xVOCap(rec,prec)
+  -- From the PASCAL VOC 2011 devkit
+  local mrec=torch.cat(torch.zeros(1), rec):cat(torch.ones(1))
+  local mpre=torch.cat(torch.zeros(1), prec):cat(torch.zeros(1))
+
+  for i=mpre:size(1)-1,1,-1 do
+    mpre[i]=math.max(mpre[i],mpre[i+1])
+  end
+
+  local indexA = torch.ByteTensor(mrec:size()):zero()
+  local indexB = torch.ByteTensor(mrec:size()):zero()
+  for ii = 2,mrec:size(1) do
+    if mrec[ii-1]~=mrec[ii] then
+      indexA[ii] = 1
+      indexB[ii-1] = 1
+    end
+  end
+
+  local ap=torch.sum((mrec[indexA]-mrec[indexB]):cmul(mpre[indexB]))
+
+  return ap
+end
+
+
+local function evaluateTpFp(matches,gt)
+  local iou,tp,fp,npos = 0, 0, 0, 0
+  npos = #gt.rois
+  --iterate over all matches and determain ioU
+  for i,m in ipairs(matches) do
+    local roi_m
+    if m.p > 0.9 then
+      roi_m = m.r
+    else
+      ::continue::
+    end
+    for igt,vgt in ipairs(gt) do
+      iou = Rect.IoU(vgt.rect,roi_m)
+
+      if iou > 0.5 then --check overlay
+        --discriminate between tp and fp
+        if vgt.class_index == m.class then --compare class label
+          tp = tp + 1
+      else
+        fp = fp + 1
+      end
+      end
+    end
+  end
+  return tp, fp, npos
+end
+
+
 function plot_training_progress(prefix, stats)
   local fn_p = string.format('%s/%sproposal_progress.png',opt.resultDir,prefix)
   local fn_d = string.format('%s/%sdetection_progress.png',opt.resultDir,prefix)
@@ -102,6 +183,9 @@ function load_model(cfg, model_path, network_filename, cuda)
   local model = model_factory(cfg)
   graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
   graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
+  graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
+  graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
+
   if cuda then
     model.cnet:cuda()
     model.pnet:cuda()
@@ -139,7 +223,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls)
 
   print '==> configuring optimizer'
-  local optimState, optimMethod
+  local optimState, optimMethod, learnSchedule
   if opt.opti == 'CG' then
     optimState = {
       maxIter = 10000
@@ -158,11 +242,32 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     optimState = {
       learningRate = opt.lr,
       weightDecay = 1E-5,
-      momentum = 0.6,
-      learningRateDecay = 0
+      momentum = 0.8, --0.6,
+      nesterov = true,
+      learningRateDecay = 0,
+      dampening = 0.0
     }
     optimMethod = optim.sgd
-
+    --[[
+    learnSchedule =
+    {
+      --  start,     end,     LR,     WD
+        {     1,    8000,   5e-2,   5e-4 },
+        {  8001,   16000,   1e-2,   1e-4 },
+        { 16001,   24000,   5e-3,   5e-5 },
+        { 24001,   35000,   1e-4,   1e-5 },
+        { 35001,     1e8,   1e-5,      0 }
+    }
+    ]]
+    learnSchedule =
+    {
+      --  start,     end,     LR,     WD
+        {     1,    8000,   5e-4,   5e-5 },
+        {  8001,   16000,   1e-4,   1e-5 },
+        { 16001,   24000,   1e-5,      0 },
+        { 24001,   35000,   1e-5,      0 },
+        { 35001,     1e8,   1e-5,      0 }
+    }
   elseif opt.opti == 'rmsprop' then
     optimState = {
       learningRate = opt.lr,
@@ -204,12 +309,23 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       optimState.learningRate = opt.lr
     end
 
+    if opt.opti == 'sgd' then
+      for _,row in ipairs(learnSchedule) do
+        if i >= row[1] and i <= row[2] then
+          optimState.learningRate = row[3]
+          optimState.weightDecay = row[4]
+        end
+      end
+    end
+
     local timer = torch.Timer()
     local _, loss = optimMethod(eval_objective_grad, weights, optimState)
 
     local time = timer:time().real
 
+    print('---------------------------------------------------------------------------------')
     print(string.format('[Main:graph_training] %d: loss: %f', i, loss[1]))
+    print('---------------------------------------------------------------------------------')
 
     if i%opt.plot == 0 then
       confusion_pcls:updateValids()
@@ -222,11 +338,12 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       plot_training_progress(snapshot_prefix, training_stats)
       evaluation( model, training_data, optimState, i)
 
+      --[[
       graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
       graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
       graph.dot(model.pnet.fg, 'pnet', string.format('%s/pnet_fg',opt.resultDir))
       graph.dot(model.pnet.bg, 'pnet', string.format('%s/pnet_bg',opt.resultDir))
-
+      ]]
       confusion_pcls:zero()
       confusion_ccls:zero()
 
@@ -281,15 +398,20 @@ function evaluation(model, training_data,optimState,epoch)
 
   -- create detector
   local d = Detector(model)
-
+  local npos =0
+  local tp = torch.zeros(20)
+  local fp = torch.zeros(20)
+  local save = opt.resultDir
   for i=1,20 do
-
     --print(string.format('[Main:evaluation] iteration: %d',i))
     -- pick random validation image
     local b = batch_iterator:nextValidation(1)[1]
     local img = b.img:cuda()
     local matches = d:detect(img)
-    --print(matches)
+    local v
+
+    tp[i],fp[i],v = evaluateTpFp(matches,b)
+      npos = npos + v
     if color_space == 'yuv' then
       img = image.yuv2rgb(img)
     elseif color_space == 'lab' then
@@ -304,10 +426,14 @@ function evaluation(model, training_data,optimState,epoch)
     for ii = 1,#b.rois do
       draw_rectangle(img, b.rois[ii].rect, white)
     end
-    local save = opt.resultDir
-    image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
 
-    local base64im_p
+    image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+  end
+  local rec,prec, ap = averagePrecision(tp,fp,npos)
+  ap = xVOCap(rec,prec)
+  print(string.format("mAP : %04f",ap*100))
+
+  local base64im_p
     local base64im_d
     do
       os.execute(('openssl base64 -in %s/%sproposal_progress.png -out %s/%s_proposal_progress.base64'):format(save,opt.name,save,opt.name))
@@ -358,8 +484,6 @@ function evaluation(model, training_data,optimState,epoch)
       file:write'</body></html>'
       file:close()
     end
-  
-  end
 
 end
 
