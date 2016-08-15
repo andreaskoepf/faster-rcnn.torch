@@ -7,8 +7,9 @@ Status: Basic detection in my personal environment works.
 A 'small' network is used that can be trained on a 4 GB GPU with 800x450 images.
 Began experimenting with ImageNet: create-imagenet-traindat.lua can be used to create a training data file for the ILSVRC2015 dataset.
 
-## Note:
-The number of "scales" in the config file (e.g. config/imagenet.lua) and the number of "anchor nets" in the model (e.g. models/vgg_small.lua) have to be the same!
+## Notes:
+- The number of "scales" in the config file (e.g. config/imagenet.lua) and the number of "anchor nets" in the model (e.g. models/vgg_small.lua) have to be the same!
+- To enable training with only the first batch of images, set "self.training.i = 1" at the beginning of "function BatchIterator:nextTraining(count)" in "BatchIterator.lua". Training with only one image batch might be helpful for testing some network components/functionalities, because, when training on always the same image batch, the training error should go down very soon (otherwise something's wrong).
 
 ## Todo:
 - [!] regularly evaluate net during traning to compute test-set loss
