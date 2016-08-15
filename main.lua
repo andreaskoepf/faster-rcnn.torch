@@ -31,6 +31,7 @@ cmd:option('-model', 'models/vgg_small.lua', 'model factory file')
 cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix')
 cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
 cmd:option('-restore', '', 'network snapshot file name to load')
+cmd:option('-mode', 'both', 'one of three training modes: onlyPnet, onlyCnet, or both')
 cmd:option('-snapshot', 1000, 'snapshot interval')
 cmd:option('-plot', 100, 'plot training progress interval')
 cmd:option('-lr', 1E-3, 'learn rate')
@@ -220,7 +221,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   end
 
   local batch_iterator = BatchIterator.new(model, training_data)
-  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls)
+  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode)
 
   print '==> configuring optimizer'
   local optimState, optimMethod, learnSchedule
@@ -334,7 +335,9 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       local train_acc_cnet = confusion_ccls.totalValid * 100
       print(string.format('[Main:graph_training] Train accuracy: pnet'..c.cyan'%.2f cnet:'..c.cyan'%.2f ',train_acc_pnet,train_acc_cnet))
       print(string.format('training pnet confusion: %s',tostring(confusion_pcls)))
-      print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
+      if opt.mode ~= 'onlyPnet' then
+        print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
+      end
       plot_training_progress(snapshot_prefix, training_stats)
       evaluation( model, training_data, optimState, i)
 
@@ -398,10 +401,11 @@ function evaluation(model, training_data,optimState,epoch)
 
   -- create detector
   local d = Detector(model)
-  local npos =0
+  local npos = 0
   local tp = torch.zeros(20)
   local fp = torch.zeros(20)
   local save = opt.resultDir
+
   for i=1,20 do
     --print(string.format('[Main:evaluation] iteration: %d',i))
     -- pick random validation image
@@ -410,8 +414,11 @@ function evaluation(model, training_data,optimState,epoch)
     local matches = d:detect(img)
     local v
 
-    tp[i],fp[i],v = evaluateTpFp(matches,b)
+    if opt.mode ~= 'onlyPnet' then
+      tp[i],fp[i],v = evaluateTpFp(matches,b)
       npos = npos + v
+    end
+
     if color_space == 'yuv' then
       img = image.yuv2rgb(img)
     elseif color_space == 'lab' then
@@ -428,13 +435,16 @@ function evaluation(model, training_data,optimState,epoch)
     end
 
     image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+  end -- for i=1,20 do
+
+  if opt.mode ~= 'onlyPnet' then
+    local rec, prec, ap = averagePrecision(tp,fp,npos)
+    ap = xVOCap(rec,prec)
+    print(string.format("mAP : %04f",ap*100))
   end
-  local rec,prec, ap = averagePrecision(tp,fp,npos)
-  ap = xVOCap(rec,prec)
-  print(string.format("mAP : %04f",ap*100))
 
   local base64im_p
-    local base64im_d
+  local base64im_d
     do
       os.execute(('openssl base64 -in %s/%sproposal_progress.png -out %s/%s_proposal_progress.base64'):format(save,opt.name,save,opt.name))
       os.execute(('openssl base64 -in %s/%sdetection_progress.png -out %s/%s_detection_progress.base64'):format(save,opt.name,save,opt.name))
@@ -473,17 +483,19 @@ function evaluation(model, training_data,optimState,epoch)
       file:write'Training pcls\n'
       file:write(tostring(confusion_pcls)..'\n')
       file:write'</pre>\n'
-      file:write'<pre>\n'
-      file:write'Training ccls\n'
-      file:write(tostring(confusion_ccls)..'\n')
-      file:write'</pre>\n'
+      if opt.mode ~= 'onlyPnet' then
+        file:write'<pre>\n'
+        file:write'Training ccls\n'
+        file:write(tostring(confusion_ccls)..'\n')
+        file:write'</pre>\n'
+      end
       file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_fg','cnet_fg','cnet_fg'))
       file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_bg','cnet_bg','cnet_bg'))
       file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_fg','pnet_fg','pnet_fg'))
       file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','pnet_bg','pnet_bg','pnet_bg'))
       file:write'</body></html>'
       file:close()
-    end
+    end -- if file ~= nil then
 
 end
 
