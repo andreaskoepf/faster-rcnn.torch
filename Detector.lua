@@ -5,7 +5,8 @@ require 'Anchors'
 
 local Detector = torch.class('Detector')
 
-function Detector:__init(model)
+function Detector:__init(model, mode)
+  self.mode = mode or "full"
   local cfg = model.cfg
   self.model = model
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
@@ -69,7 +70,7 @@ function Detector:detect(input)
 
   end
 
-  if mode == 'onlyPnet' then
+  if self.mode == 'onlyPnet' then
     return matches
   else
     local winners = {}
@@ -119,14 +120,14 @@ function Detector:detect(input)
         x.class = c[1]
         x.confidence = p[1]
         -- print(x.class)
-        if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
+        --if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
           --if x.class ~= bgclass and x.confidence > 0.2 then
           if not yclass[x.class] then
             yclass[x.class] = {}
           end
 
           table.insert(yclass[x.class], x)
-        end
+        --end
       end
 
 

@@ -176,7 +176,7 @@ function draw_rectangle(img, rect,label, color)
   end
 
   if h >= 0 and w >= 0 then
-    img:copy(image.drawText(img:double(),label,x1,y0,{color = {0, 255, 0}, size =1}))
+    img:copy(image.drawText(img:double(),label,x0,y0,{color = {color[1]*255,color[2]*255,color[3]*255}, size =1}))
     img:cuda()
   end
   --return img

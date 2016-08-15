@@ -125,7 +125,7 @@ local function evaluateTpFp(matches,gt)
     if m.p > 0.9 then
       roi_m = m.r
     else
-      ::continue::
+      goto continue
     end
     for igt,vgt in ipairs(gt) do
       iou = Rect.IoU(vgt.rect,roi_m)
@@ -139,6 +139,7 @@ local function evaluateTpFp(matches,gt)
       end
       end
     end
+    ::continue::
   end
   return tp, fp, npos
 end
@@ -194,15 +195,23 @@ function load_model(cfg, model_path, network_filename, cuda)
   local weights = {}
   local gradient
   -- combine parameters from pnet and cnet into flat tensors
-  weights[1], _ = combine_and_flatten_parameters(model.pnet, model.cnet)
+  weights[1], gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
   local training_stats
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
     --training_stats = stored.stats
     weights[1]:copy(stored.weights)
   end
-  weights[2], gradient = combine_and_flatten_parameters(model.cnet)
-  return model, weights[2], gradient, training_stats
+  if opt.mode == 'onlyCnet' then
+    weights[2], gradient = combine_and_flatten_parameters(model.cnet)
+    return model, weights[2], gradient, training_stats
+  elseif opt.mode == 'onlyPnet' then
+    weights[2], gradient = combine_and_flatten_parameters(model.pnet)
+    return model, weights[2], gradient, training_stats
+  elseif opt.mode == 'both' then
+    return model, weights[1], gradient, training_stats
+  end
+  
 end
 
 
@@ -307,7 +316,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   end
 
   for i=1,50000 do
-    if (i % 5000) == 0 then
+    if (i % 500) == 0 then
       opt.lr = opt.lr - opt.lr/2
       optimState.learningRate = opt.lr
     end
@@ -320,6 +329,8 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
         end
       end
     end
+    
+
 
     local timer = torch.Timer()
     local _, loss = optimMethod(eval_objective_grad, weights, optimState)
@@ -402,7 +413,7 @@ function evaluation(model, training_data,optimState,epoch)
   local colors = { red, green, blue, white }
 
   -- create detector
-  local d = Detector(model)
+  local d = Detector(model,opt.mode)
   local npos = 0
   local tp = torch.zeros(20)
   local fp = torch.zeros(20)
@@ -430,10 +441,14 @@ function evaluation(model, training_data,optimState,epoch)
     end
     -- draw bounding boxes and save image
     for i,m in ipairs(matches) do
-      draw_rectangle(img, m.r,string.format("Classnumber: %d, conf: %04f",m.class,m.confidence), green)
+      if m.class == 201 then
+        draw_rectangle(img, m.r,string.format("CI: %d",m.class), red)
+      else
+        draw_rectangle(img, m.r,string.format("CI: %d",m.class), green)
+      end
     end
     for ii = 1,#b.rois do
-      draw_rectangle(img, b.rois[ii].rect,string.format("Classnumber: %d",b.rois[ii].class_index), white)
+      draw_rectangle(img, b.rois[ii].rect,string.format("CI: %d",b.rois[ii].class_index), white)
     end
 
     image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
@@ -500,48 +515,6 @@ function evaluation(model, training_data,optimState,epoch)
 
 end
 
-
-function evaluation_demo(cfg, model_path, training_data_filename, network_filename)
-  -- load trainnig data
-  local training_data = load_obj(training_data_filename)
-
-  -- load model
-  local model = load_model(cfg, model_path, network_filename, true)
-  local batch_iterator = BatchIterator.new(model, training_data)
-
-  local red = torch.Tensor({1,0,0})
-  local green = torch.Tensor({0,1,0})
-  local blue = torch.Tensor({0,0,1})
-  local white = torch.Tensor({1,1,1})
-  local colors = { red, green, blue, white }
-
-  -- create detector
-  local d = Detector(model)
-
-  for i=1,20 do
-
-    -- pick random validation image
-    local b = batch_iterator:nextValidation(1)[1]
-    local img = b.img:cuda()
-    print(string.format('iteration: %d',i))
-    local matches = d:detect(img)
-    if color_space == 'yuv' then
-      img = image.yuv2rgb(img)
-    elseif color_space == 'lab' then
-      img = image.lab2rgb(img)
-    elseif color_space == 'hsv' then
-      img = image.hsv2rgb(img)
-    end
-
-    -- draw bounding boxes and save image
-    for i,m in ipairs(matches) do
-      draw_rectangle(img, m.r, green)
-    end
-
-    image.saveJPG(string.format('%s/output%d.jpg',opt.resultDir, i), img)
-  end
-
-end
 
 graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
 --evaluation_demo(cfg, opt.model, opt.train, opt.restore)

@@ -17,7 +17,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
   local pnet = model.pnet
   local cnet = model.cnet
 
-  local bgclass = cfg.class_count + 1   -- background class
+  local bgclass = cfg.backgroundClass or cfg.class_count + 1   -- background class
   local anchors = batch_iterator.anchors
   local localizer = Localizer.new(pnet.outnode.children[1])
 
@@ -226,19 +226,24 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       -- backward pass of proposal network
       if mode ~= 'onlyCnet' then
         local gi = pnet:backward(img, delta_outputs)
+        -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
+
       end
 
-      -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
-      reg_count = reg_count + #p
-      cls_count = cls_count + #p + #n
-
-      creg_count = creg_count + #p
-      ccls_count = ccls_count + 1
+        reg_count = reg_count + #p
+        cls_count = cls_count + #p + #n
+        creg_count = creg_count + #p
+        ccls_count = ccls_count + 1
     end
 
     -- scale gradient
     if cls_count ~= 0 then
-      gradient:div(cls_count) -- will divide all elements of gradient with cls_count in-place
+      if mode ~= 'onlyCnet' then 
+        gradient:div(cls_count) -- will divide all elements of gradient with cls_count in-place
+      end
+      if mode == 'onlyCnet' then 
+        gradient:div(ccls_count) -- will divide all elements of gradient with cls_count in-place
+      end
     end
 
     local pcls = cls_loss    -- proposal classification (bg/fg)

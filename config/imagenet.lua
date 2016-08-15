@@ -14,7 +14,8 @@
   positive_threshold = 0.7,
   negative_threshold = 0.3,
   best_match = true,
-  nearby_aversion = false
+  nearby_aversion = false,
+  backgroundClass = 201
 }
 
 return imgnet_cfg
