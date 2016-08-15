@@ -15,7 +15,7 @@ function Localizer:__init(outnode)
       else
         table.insert(modules, c)
       end
-    end  
+    end
     while node do
       if node.data.module then
         add_modules(node.data.module)

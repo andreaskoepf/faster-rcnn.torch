@@ -81,6 +81,7 @@ function Detector:detect(input)
       for i=1,#matches do
         bb[i] = matches[i].r:totensor()
         score[i] = matches[i].p
+
       end
 
       local iou_threshold = 0.25 --FIXME =0.25
@@ -88,6 +89,7 @@ function Detector:detect(input)
       --local pick = nms(bb, iou_threshold, 'area')
       local candidates = {}
       pick:apply(function (x) table.insert(candidates, matches[x]) end )
+
 
       --print(string.format('[Detector:detect] candidates: %d', #candidates))
 
@@ -127,6 +129,7 @@ function Detector:detect(input)
         end
       end
 
+
       local overlab = 0.2
       -- run per class NMS
       for i,c in pairs(yclass) do
@@ -139,10 +142,10 @@ function Detector:detect(input)
 
         pick = nms(bb, overlab, bb[{{}, 5}])
         pick:apply(function (x) table.insert(winners, c[x]) end )
-
       end
     end
 
     return winners
   end -- if mode ~= 'onlyPnet' then
+
 end

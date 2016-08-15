@@ -1,6 +1,6 @@
 require 'lfs' -- lua file system for directory listings
 require 'nn'
-require 'image'
+local image = require 'image'
 
 function list_files(directory_path, max_count, abspath)
   local l = {}
@@ -9,7 +9,7 @@ function list_files(directory_path, max_count, abspath)
       break
     end
     local full_fn = path.join(directory_path, fn)
-    if lfs.attributes(full_fn, 'mode') == 'file' then 
+    if lfs.attributes(full_fn, 'mode') == 'file' then
       table.insert(l, abspath and full_fn or fn)
     end
   end
@@ -61,23 +61,23 @@ function shallow_copy(t)
 end
 
 function deep_copy(obj, seen)
-  if type(obj) ~= 'table' then 
-    return obj 
+  if type(obj) ~= 'table' then
+    return obj
   end
-  if seen and seen[obj] then 
-    return seen[obj] 
+  if seen and seen[obj] then
+    return seen[obj]
   end
   local s = seen or {}
   local res = setmetatable({}, getmetatable(obj))
   s[obj] = res
-  for k, v in pairs(obj) do 
-    res[deep_copy(k, s)] = deep_copy(v, s) 
+  for k, v in pairs(obj) do
+    res[deep_copy(k, s)] = deep_copy(v, s)
   end
   return res
 end
 
 function reverse(array)
-  local n = #array, t 
+  local n = #array, t
   for i=1,n/2 do
     t = array[i]
     array[i] = array[n-i+1]
@@ -125,12 +125,12 @@ end
 
 function save_model(file_name, weights, options, stats)
   save_obj(file_name,
-  {
-    version = 0,
-    weights = weights,
-    options = options,
-    stats = stats
-  })
+    {
+      version = 0,
+      weights = weights,
+      options = options,
+      stats = stats
+    })
 end
 
 function combine_and_flatten_parameters(...)
@@ -146,9 +146,9 @@ function combine_and_flatten_parameters(...)
   return nn.Module.flatten(parameters), nn.Module.flatten(gradParameters)
 end
 
-function draw_rectangle(img, rect, color)
+function draw_rectangle(img, rect,label, color)
   local sz = img:size()
-  
+
   local x0 = math.max(1, rect.minX)
   local x1 = math.min(sz[3], rect.maxX)
   local w = math.floor(x1) - math.floor(x0)
@@ -161,20 +161,27 @@ function draw_rectangle(img, rect, color)
       img[{{}, rect.maxY, {x0, x1}}] = v
     end
   end
-  
+
   local y0 = math.max(1, rect.minY)
   local y1 = math.min(sz[2], rect.maxY)
   local h = math.floor(y1) - math.floor(y0)
   if h >= 0 then
     local v = color:view(3,1):expand(3, h + 1)
     if rect.minX > 0 and rect.minX <= sz[3] then
-      img[{{}, {y0, y1}, rect.minX}] = v 
+      img[{{}, {y0, y1}, rect.minX}] = v
     end
     if rect.maxX > 0 and rect.maxX <= sz[3] then
       img[{{}, {y0, y1}, rect.maxX}] = v
     end
   end
+
+  if h >= 0 and w >= 0 then
+    img:copy(image.drawText(img:double(),label,x1,y0,{color = {0, 255, 0}, size =1}))
+    img:cuda()
+  end
+  --return img
 end
+
 
 function remove_quotes(s)
   return s:gsub('^"(.*)"$', "%1")
