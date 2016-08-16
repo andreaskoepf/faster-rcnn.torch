@@ -2,20 +2,20 @@ require 'Localizer'
 dofile 'generate_anchor.lua'
 local Anchors = torch.class('Anchors')
 
-local BIN_SIZE = 8   -- granularity for mapping center points to nearby-anchors (for nearby_aversion)
+local BIN_SIZE = 4   -- granularity for mapping center points to nearby-anchors (for nearby_aversion)
 
 function Anchors:__init(proposal_net, scales)
   -- create localizers
   self.localizers = {}
   self.localizers[1] = Localizer.new(proposal_net.outnode.children[1].children[1])
-  
+
   -- generate vertical and horizontal min-max anchor lookup tables
   local width, height = 200, 200  -- max size of feature layers
-  
+
   -- indicies: scale, aspect-ratio, i, min/max
   self.w = torch.Tensor(1, #scales*3, width, 2)
   self.h = torch.Tensor(1, #scales*3, height, 2)
-  
+
   -- create simple map to enable finding of nearby anchors (e.g. enable counter-example training)
   self.cx = {}
   self.cy = {}
@@ -26,28 +26,30 @@ function Anchors:__init(proposal_net, scales)
     end
     table.insert(map[key], { i, j, v })
   end
-  
+
   for i,s in ipairs(scales) do
     -- width, height for boxes with s^2 pixels with aspect ratios 1:1, 2:1, 1:2
-    local a = s --/ math.sqrt(2)
-    print(s)
-    local aspects = generate_anchors(torch.Tensor({{s}})) --{ { s, s }, { 2*a, a }, { a, 2*a } }
-     local l = self.localizers[1]
+    --local a = s --/ math.sqrt(2)
+
+    local rawAnchor = generate_anchors(torch.Tensor({{math.sqrt(s)}}))
+    print(torch.type(rawAnchor[1][1]))
+    local aspects = { {rawAnchor[1][1]:width(),rawAnchor[1][1]:height()}, {rawAnchor[2][1]:width(),rawAnchor[2][1]:height()}, {rawAnchor[3][1]:width(),rawAnchor[3][1]:height()} }--{ { s, s }, { 2*a, a }, { a, 2*a } }
+    local l = self.localizers[1]
     for j,b in ipairs(aspects) do
       for y=1,height do
         local r = l:featureToInputRect(0, y-1, 0, y)
         local centerX, centerY = r:center()
-        
-        r = Rect.fromCenterWidthHeight(centerX, centerY, b[1]:width(), b[1]:height())
+
+        r = Rect.fromCenterWidthHeight(centerX, centerY, b[1], b[2])
         self.h[{1, i*3-3+j, y, 1}] = r.minY
         self.h[{1, i*3-3+j, y, 2}] = r.maxY
         add(self.cy, i, j, y, centerY)
       end
-      
+
       for x=1,width do
         local r = l:featureToInputRect(x-1, 0, x, 0)
         local centerX, centerY = r:center()
-        r = Rect.fromCenterWidthHeight(centerX, centerY,b[1]:width(), b[1]:height())
+        r = Rect.fromCenterWidthHeight(centerX, centerY,b[1], b[2])
         self.w[{1, i*3-3+j, x, 1}] = r.minX
         self.w[{1, i*3-3+j, x, 2}] = r.maxX
         add(self.cx, i, j, x, centerX)
@@ -104,12 +106,13 @@ function Anchors:findRangesXY(rect, clip_rect)
     end
     return low
   end
-  
+
   local ranges = {}
   local w,h = self.w, self.h
   local s = w:size()
-  for i=1,s[1] do   -- this should be the amount of anchor networks 
-    for j=1,s[2] do    --  scales times aspect ratios
+
+  for i=1,s[1] do   -- this should be the amount of anchor networks
+    for j=1,s[2] do   --  scales times aspect ratios
 
       local clx, cly, cux, cuy  -- lower and upper bounds of clipping rect (indices)
       if clip_rect then
@@ -119,11 +122,11 @@ function Anchors:findRangesXY(rect, clip_rect)
         cux = upper_bound(w[{i, j, {}, 2}], clip_rect.maxX)   -- xend:   a.maxX > r.maxX
         cuy = upper_bound(h[{i, j, {}, 2}], clip_rect.maxY)   -- yend:   a.maxY > r.maxY
       end
-    
+
       local l = { layer = i, aspect = j }
-      
+
       -- at least one vertex must lie in rect
-      l.lx = upper_bound(w[{i, j, {}, 2}], rect.minX)   -- xbegin: a.maxX > r.minX 
+      l.lx = upper_bound(w[{i, j, {}, 2}], rect.minX)   -- xbegin: a.maxX > r.minX
       l.ly = upper_bound(h[{i, j, {}, 2}], rect.minY)   -- ybegin: a.maxY > r.minY
       l.ux = lower_bound(w[{i, j, {}, 1}], rect.maxX)   -- xend:   a.minX >= r.maxX
       l.uy = lower_bound(h[{i, j, {}, 1}], rect.maxY)   -- yend:   a.minY >= r.maxY
@@ -134,14 +137,14 @@ function Anchors:findRangesXY(rect, clip_rect)
         l.ux = math.min(l.ux, cux)
         l.uy = math.min(l.uy, cuy)
       end
-      
+
       if l.ux > l.lx and l.uy > l.ly then
         l.xs = w[{i, j, {l.lx, l.ux-1}, {}}]
         l.ys = h[{i, j, {l.ly, l.uy-1}, {}}]
         ranges[#ranges+1] = l
       end
 
-    end
+  end
   end
 
   return ranges
@@ -150,18 +153,18 @@ end
 function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold, include_best)
   local matches = {}
   local best_set, best_iou
-  
+
   for i,roi in ipairs(roi_list) do
-    
+
     if include_best then
       best_set = {}   -- best is set to nil if a positive entry was found
       best_iou = neg_threshold
-    end 
-    
+    end
+
     -- evaluate IoU for all overlapping anchors
     local ranges = self:findRangesXY(roi.rect, clip_rect)
-   --print(string.format("number of anchors before IoU eval: %d",#ranges))
-    
+    --print(string.format("number of anchors before IoU eval: %d",#ranges))
+
     for j,r in ipairs(ranges) do
       -- generate all candidate anchors from xs,ys ranges list
       for y=1,r.ys:size()[1] do
@@ -169,26 +172,27 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
         for x=1,r.xs:size()[1] do
           -- create rect, add layer & aspect info
           local anchor_rect = Rect.new(r.xs[{x, 1}], minY, r.xs[{x, 2}], maxY)
-          
+
           --print(anchor_rect)
           --print(roi.rect)
           local centerx,centery = anchor_rect:center()
-          
+
           local w_tmp = anchor_rect:width()
           local h_tmp = anchor_rect:height()
-          for c1 = -5,5,2 do -- multiply training data in the close by area
-            for c2 =-5,5,2 do
+          for c1 = -8,8,2 do -- multiply training data in the close by area
+            for c2 =-8,8,2 do
+              -- local c1, c2 = 0,0
               anchor_rect = Rect.fromCenterWidthHeight(centerx+c1,centery+c2,w_tmp,h_tmp)
               anchor_rect.layer = r.layer
-              anchor_rect.aspect = r.aspect 
+              anchor_rect.aspect = r.aspect
               anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
               local v = Rect.IoU(roi.rect, anchor_rect)
               --print(v)
-              
+
               if v > pos_threshold then
                 table.insert(matches, { anchor_rect, roi })
                 best_set = nil
-              --elseif v > neg_threshold and best_set and v >= best_iou then
+                --elseif v > neg_threshold and best_set and v >= best_iou then
               elseif best_set and v >= best_iou then
                 --if v - 0.025 > best_iou then
                 best_set = {}
@@ -196,7 +200,7 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
                 table.insert(best_set, anchor_rect)
                 best_iou = v
               end
-            end
+          end
           end
         end
       end
@@ -209,7 +213,7 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
         table.insert(matches, { v, roi })
       end
     end
-    
+
   end
 
   return matches
@@ -218,43 +222,42 @@ end
 function Anchors:sampleNegative(image_rect, roi_list, neg_threshold, count)
   -- get ranges for all anchors inside image
   local ranges = self:findRangesXY(image_rect, image_rect)
-  
   -- use random sampling
   local neg = {}
   local retry = 0
   while #neg < count and retry < 500 do
-    
+
     -- select random anchor
     local r = ranges[torch.random() % #ranges + 1]
     local x = torch.random() % r.xs:size()[1] + 1
     local y = torch.random() % r.ys:size()[1] + 1
 
-   -- print(string.format("x: %d, y: %d, r.xs: %d ,r.ys: %d",x,y,r.xs:size()[1],r.ys:size()[1]))
+    -- print(string.format("x: %d, y: %d, r.xs: %d ,r.ys: %d",x,y,r.xs:size()[1],r.ys:size()[1]))
 
     local anchor_rect = Rect.new(r.xs[{x, 1}], r.ys[{y, 1}], r.xs[{x, 2}], r.ys[{y, 2}])
     anchor_rect.layer = r.layer
-    anchor_rect.aspect = r.aspect 
+    anchor_rect.aspect = r.aspect
     anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
-   --print(anchor_rect)
-   --io.read()
+    --print(anchor_rect)
+    --io.read()
     -- test against all rois
     local match = false
     for j,roi in ipairs(roi_list) do
       if Rect.IoU(roi.rect, anchor_rect) > neg_threshold then
         match = true
         break
-      end 
+      end
     end
-    
+
     if not match then
       retry = 0
       table.insert(neg, { anchor_rect })
     else
-      retry = retry + 1 
+      retry = retry + 1
     end
-    
+
   end
-  
+
   return neg
 end
 
@@ -273,68 +276,14 @@ function Anchors.anchorToInput(anchor, t,center)
       t[1] * anchor:width() + anchor.minX,
       t[2] * anchor:height() + anchor.minY,
       math.exp(t[3]) * anchor:width(),
-      math.exp(t[4]) * anchor:height() 
+      math.exp(t[4]) * anchor:height()
     )
   end
   return Rect.fromXYWidthHeight(
     t[1] * anchor:width() + anchor.minX,
     t[2] * anchor:height() + anchor.minY,
     math.exp(t[3]) * anchor:width(),
-    math.exp(t[4]) * anchor:height() 
+    math.exp(t[4]) * anchor:height()
   )
 end
 
-
-
---[[
-function Anchors.inputToAnchor(anchor, rect)
-
-    local ex_widths = anchor:width()+1
-    local ex_heights = anchor:heights()+1
-    local ex_ctr_x = anchor.minX + 0.5 * (ex_widths - 1)
-    local ex_ctr_y = anchor.minY + 0.5 * (ex_heights - 1)
-    
-    local gt_widths = rect:width()+1
-    local gt_heights = rect:height()+1
-    local gt_ctr_x = rect.minX + 0.5 * (gt_widths - 1)
-    local gt_ctr_y = rect.minY + 0.5 * (gt_heights - 1)
-    
-    local x = (gt_ctr_x - ex_ctr_x) / (ex_widths+1e-16)
-    local y = (gt_ctr_y - ex_ctr_y) / (ex_heights+1e-16)
-    local w = math.log(gt_widths / ex_widths)
-    local h = math.log(gt_heights / ex_heights)
-  return torch.FloatTensor({x, y, w, h})
-end
-
-function Anchors.anchorToInput(anchor, t)
-
-    
-    src_w = anchor:width()+1
-    src_h = anchor:width()+1
-    src_ctr_x = double(boxes(:, 1) + 0.5*(src_w-1));
-    src_ctr_y = double(boxes(:, 2) + 0.5*(src_h-1));
-    
-    dst_ctr_x = double(box_deltas(:, 1:4:end));
-    dst_ctr_y = double(box_deltas(:, 2:4:end));
-    dst_scl_x = double(box_deltas(:, 3:4:end));
-    dst_scl_y = double(box_deltas(:, 4:4:end));
-
-    pred_ctr_x = bsxfun(@plus, bsxfun(@times, dst_ctr_x, src_w), src_ctr_x);
-    pred_ctr_y = bsxfun(@plus, bsxfun(@times, dst_ctr_y, src_h), src_ctr_y);
-    pred_w = bsxfun(@times, exp(dst_scl_x), src_w);
-    pred_h = bsxfun(@times, exp(dst_scl_y), src_h);
-    pred_boxes = zeros(size(box_deltas), 'single');
-    pred_boxes(:, 1:4:end) = pred_ctr_x - 0.5*(pred_w-1);
-    pred_boxes(:, 2:4:end) = pred_ctr_y - 0.5*(pred_h-1);
-    pred_boxes(:, 3:4:end) = pred_ctr_x + 0.5*(pred_w-1);
-    pred_boxes(:, 4:4:end) = pred_ctr_y + 0.5*(pred_h-1); 
-
-
-  return Rect.fromXYWidthHeight(
-    t[1] * anchor:width() + anchor.minX,
-    t[2] * anchor:height() + anchor.minY,
-    math.exp(t[3]) * anchor:width(),
-    math.exp(t[4]) * anchor:height() 
-  )
-end
---]]
