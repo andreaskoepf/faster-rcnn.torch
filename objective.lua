@@ -224,14 +224,14 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
         local ccdelta = softmax:backward(ccout, cctarget)--]]
 
-        local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
+        --local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
 
         cnet_confusion:batchAdd(ccout, cctarget)
         -- run backward pass over rois
-        for i,x in ipairs(roi_pool_state) do
-          amp.indices = x.indices
-          delta_outputs[#delta_outputs][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
-        end
+        --for i,x in ipairs(roi_pool_state) do
+        --  amp.indices = x.indices
+        --  delta_outputs[#delta_outputs][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
+        --end
       end
 
       -- backward pass of proposal network

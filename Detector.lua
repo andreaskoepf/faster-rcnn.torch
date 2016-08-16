@@ -15,7 +15,7 @@ function Detector:__init(model)
 end
 
 function Detector:detect(input)
-  local DEBUG = false
+  local DEBUG = true
   local cfg = self.model.cfg
   local pnet = self.model.pnet
   local cnet = self.model.cnet
@@ -110,7 +110,7 @@ function Detector:detect(input)
     local coutputs = cnet:forward(cinput)
     local bbox_out = coutputs[1]
     local cls_out = coutputs[2]
-    local c_norm= m:forward(cls_out)
+    local c_norm= lsm:forward(cls_out)
     local yclass = {}
     for i,x in ipairs(candidates) do
       x.r2 = Anchors.anchorToInput(x.r, bbox_out[i])
@@ -121,14 +121,14 @@ function Detector:detect(input)
       x.class = c[1]
       x.confidence = p[1]
       -- print(x.class)
-      if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
-        --if x.class ~= bgclass and x.confidence > 0.2 then
+      --if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
+      --if x.class ~= bgclass and x.confidence > 0.2 then
         if not yclass[x.class] then
           yclass[x.class] = {}
         end
 
         table.insert(yclass[x.class], x)
-      end
+      --end
     end
 
     local overlab = 0.2
@@ -149,5 +149,4 @@ function Detector:detect(input)
   end
   
   return winners
-  --return winners
 end

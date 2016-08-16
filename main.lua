@@ -120,7 +120,7 @@ end
 local optimState, optimMethod
 local function resetOptim()
   print '==> configuring optimizer'
-  
+
   if opt.opti == 'CG' then
     optimState = {
       maxIter = 10000
@@ -143,7 +143,13 @@ local function resetOptim()
       learningRateDecay = 1e-7
     }
     optimMethod = optim.sgd
-
+  elseif opt.opti == 'adam' then
+    optimState = {
+      learningRate = opt.lr,
+      beta1 = 0.9,      -- first moment coefficient
+      beta2 = 0.999     -- second moment coefficient
+    }
+    optimMethod = optim.adam
   elseif opt.opti == 'rmsprop' then
     optimState = {
       learningRate = opt.lr,
@@ -154,7 +160,9 @@ local function resetOptim()
   else
     error('unknown optimization method')
   end
-end 
+end
+
+
 function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
   local training_data = load_obj(training_data_filename)
   local file_names = keys(training_data.ground_truth)
@@ -178,28 +186,30 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   --local rmsprop_state = { learningRate = opt.lr, alpha = opt.rms_decay }
   --local nag_state = { learningRate = opt.lr, weightDecay = 0, momentum = opt.rms_decay }
   --local sgd_state = { learningRate = opt.lr, learningRateDecay= 1e-4,weightDecay = 0.0, momentum = 0.90 }
-  
-  
+
+
 
   for i=1,50000 do
     if i % 100 == 0 then
+      --[[
       resetOptim()
-        
+
       if mode == 3 then
         mode = 4
       elseif mode == 1 then
         mode = 3
       elseif mode == 2 then
-        mode = 3  
+        mode = 3
       end
-      
+    --]]
     end
 
     local timer = torch.Timer()
     local loss
     if mode == 1 then
       print("==> Only the pnet will be optimized")
-      local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.pnet:get(model.pnet:size()))
+      --local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.pnet:get(model.pnet:size()))
+      local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.pnet)
       local eval_objective_grad_pnet = create_objective(model, weights_pnet, gradient_pnet, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
       _, loss = optimMethod(eval_objective_grad_pnet, weights_pnet, optimState)
     elseif mode == 2 then
@@ -302,7 +312,7 @@ function evaluation(model, training_data,optimState,epoch)
 
     --print(string.format('[Main:evaluation] iteration: %d',i))
     -- pick random validation image
-    local b = batch_iterator:nextTraining()[1]
+    local b = batch_iterator:nextValidation(1)[1]
     local img = b.img:cuda()
     local matches = d:detect(img)
     --print(matches)
@@ -325,7 +335,7 @@ function evaluation(model, training_data,optimState,epoch)
       end
       local save = opt.resultDir
       image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
-  
+
       local base64im_p
       local base64im_d
       do
@@ -382,47 +392,7 @@ function evaluation(model, training_data,optimState,epoch)
 end
 
 
-function evaluation_demo(cfg, model_path, training_data_filename, network_filename)
-  -- load trainnig data
-  local training_data = load_obj(training_data_filename)
 
-  -- load model
-  local model = load_model(cfg, model_path, network_filename, true)
-  local batch_iterator = BatchIterator.new(model, training_data)
-
-  local red = torch.Tensor({1,0,0})
-  local green = torch.Tensor({0,1,0})
-  local blue = torch.Tensor({0,0,1})
-  local white = torch.Tensor({1,1,1})
-  local colors = { red, green, blue, white }
-
-  -- create detector
-  local d = Detector(model)
-
-  for i=1,20 do
-
-    -- pick random validation image
-    local b = batch_iterator:nextValidation(1)[1]
-    local img = b.img:cuda()
-    print(string.format('iteration: %d',i))
-    local matches = d:detect(img)
-    if color_space == 'yuv' then
-      img = image.yuv2rgb(img)
-    elseif color_space == 'lab' then
-      img = image.lab2rgb(img)
-    elseif color_space == 'hsv' then
-      img = image.hsv2rgb(img)
-    end
-
-    -- draw bounding boxes and save image
-    for i,m in ipairs(matches) do
-      draw_rectangle(img, m.r, green)
-    end
-
-    image.saveJPG(string.format('%s/output%d.jpg',opt.resultDir, i), img)
-  end
-
-end
 
 graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
 --evaluation_demo(cfg, opt.model, opt.train, opt.restore)

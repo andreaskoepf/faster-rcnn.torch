@@ -226,12 +226,12 @@ function BatchIterator:nextTraining(count)
         end
       end
 
-      local c = math.min(#positive, count)
-      shuffle_n(nearby_negative, c)
-      for i=1,c do
-        table.insert(negative, nearby_negative[i])
-        count = count + 1
-      end
+      --local c = math.min(#positive, count)
+      --shuffle_n(nearby_negative, c)
+     -- for i=1,c do
+      --  table.insert(negative, nearby_negative[i])
+      --  count = count + 1
+      --end
     end
 
     -- debug boxes
