@@ -14,6 +14,7 @@
   negative_threshold = 0.3,
   best_match = false,
   nearby_aversion = true
+
 }
 
 return imgnet_cfg
