@@ -12,7 +12,7 @@ function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
   return feature_layer_output[idx], idx
 end
 
-function create_objective(model, weights, gradient, batch_iterator, stats, pnet_confusion, cnet_confusion, mode)
+function create_objective(model, weights, gradient, batch_iterator, stats, pnet_confusion, cnet_confusion, mode, pnet_copy)
   local cfg = model.cfg
   local pnet = model.pnet
   local cnet = model.cnet
@@ -78,7 +78,11 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local n = x.negative
 
       -- run forward convolution
-      local outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+      if mode ~= 'onlyCnet' then
+        outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+      else
+        outputs = pnet_copy:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+      end
 
       -- ensure all example anchors lie withing existing feature planes
       cleanAnchors(n, outputs)
@@ -113,8 +117,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local d = delta_out[idx]
 
         -- foreground/background classification
-        cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 1)
         if mode ~= 'onlyCnet' then
+          cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 1)
           local dc = softmax:backward(v[{{1, 2}}], 1)
           d[{{1,2}}]:add(dc)
         end
@@ -124,8 +128,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         -- box regression
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
-        reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda
         if mode ~= 'onlyCnet' then
+          reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda
           local dr = smoothL1:backward(reg_out, reg_target) * lambda
           d[{{3,6}}]:add(dr)
         end
@@ -151,13 +155,14 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local v = out[idx]
         local d = delta_out[idx]
 
-        cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
         if mode ~= 'onlyCnet' then
+          cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
           local dc = softmax:backward(v[{{1, 2}}], 2)
           d[{{1,2}}]:add(dc)
         end
 
         pnet_confusion:batchAdd(v[{{1, 2}}]:reshape(1,2), target)
+
         -- pass through adaptive max pooling operation
         if mode ~= 'onlyPnet' then
           local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
@@ -226,15 +231,14 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       -- backward pass of proposal network
       if mode ~= 'onlyCnet' then
         local gi = pnet:backward(img, delta_outputs)
-        -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
-
       end
 
-        reg_count = reg_count + #p
-        cls_count = cls_count + #p + #n
-        creg_count = creg_count + #p
-        ccls_count = ccls_count + 1
-    end
+      -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
+      reg_count = reg_count + #p
+      cls_count = cls_count + #p + #n
+      creg_count = creg_count + #p
+      ccls_count = ccls_count + 1
+    end -- for i,x in ipairs(batch) do
 
     -- scale gradient
     if cls_count ~= 0 then
@@ -267,7 +271,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
     table.insert(stats.dcls, dcls)
     table.insert(stats.dreg, dreg)
 
-    local loss = pcls + preg
+    local loss = pcls + preg + dcls + dreg
 
     local absgrad = torch.abs(gradient)
     print(string.format('Gradient: max %f; mean %f', absgrad:max(), absgrad:mean()))
