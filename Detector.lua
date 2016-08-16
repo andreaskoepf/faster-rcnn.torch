@@ -6,7 +6,7 @@ require 'Anchors'
 local Detector = torch.class('Detector')
 
 function Detector:__init(model, mode)
-  self.mode = mode or "full"
+  self.mode = mode or 'both'
   local cfg = model.cfg
   self.model = model
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
