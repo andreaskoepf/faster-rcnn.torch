@@ -178,7 +178,36 @@ function plot_training_progress(prefix, stats)
   gnuplot.plotflush()
 end
 
-function load_model(cfg, model_path, network_filename, cuda)
+
+function load_model1(cfg, model_path, network_filename, cuda)
+
+  -- get configuration & model
+  local model_factory = dofile(model_path)
+  local model = model_factory(cfg)
+  graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
+  graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
+  graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
+  graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
+
+  if cuda then
+    model.cnet:cuda()
+    model.pnet:cuda()
+  end
+
+  -- combine parameters from pnet and cnet into flat tensors
+  local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
+  local training_stats
+  if network_filename and #network_filename > 0 then
+    local stored = load_obj(network_filename)
+    training_stats = stored.stats
+    weights:copy(stored.weights)
+  end
+
+  return model, weights, gradient, training_stats
+end
+
+
+function load_model2(cfg, model_path, network_filename, cuda)
 
   -- get configuration & model
   local model_factory = dofile(model_path)
@@ -216,13 +245,6 @@ end
 
 
 function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
-
-  -- create/load model
-  local model, weights, gradient, training_stats = load_model(cfg, model_path, network_filename, true)
-  if not training_stats then
-    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-  end
-
   local training_data = load_obj(training_data_filename)
   local file_names = keys(training_data.ground_truth)
   print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)",
@@ -231,8 +253,23 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     #training_data.class_names,
     #training_data.background_files))
 
+  -- create/load model
+  local model, weights, gradient, training_stats = load_model1(cfg, model_path, network_filename, true)
+  if not training_stats then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
+  end
+
+  if opt.mode == 'onlyCnet' then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
+  end
+
+  local pnet_copy = nil
+  if opt.mode == 'onlyCnet' then
+    pnet_copy = model.pnet
+  end
+
   local batch_iterator = BatchIterator.new(model, training_data)
-  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode)
+  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode, pnet_copy)
 
   print '==> configuring optimizer'
   local optimState, optimMethod, learnSchedule
@@ -316,6 +353,14 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   end
 
   for i=1,50000 do
+
+    if opt.mode == 'onlyCnet' then
+      if i == 100 then
+        opt.lr = 1e-6
+        optimState.learningRate = opt.lr
+      end
+    end
+
     if (i % 500) == 0 then
       opt.lr = opt.lr - opt.lr/2
       optimState.learningRate = opt.lr
@@ -329,8 +374,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
         end
       end
     end
-    
-
 
     local timer = torch.Timer()
     local _, loss = optimMethod(eval_objective_grad, weights, optimState)
