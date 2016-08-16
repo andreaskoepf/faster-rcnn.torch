@@ -12,8 +12,6 @@ require 'utilities'
 require 'Anchors'
 require 'BatchIterator'
 require 'objective'
---require 'objective_onlyPnetCLS'
---require 'objective_onlyPnetLOC'
 require 'Detector'
 local c = require 'trepl.colorize'
 
@@ -254,17 +252,14 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     #training_data.background_files))
 
   -- create/load model
-  local model, weights, gradient, training_stats = load_model1(cfg, model_path, network_filename, true)
+  local model, weights, gradient, training_stats = load_model2(cfg, model_path, network_filename, true)
   if not training_stats then
-    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-  end
-
-  if opt.mode == 'onlyCnet' then
     training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
   end
 
   local pnet_copy = nil
   if opt.mode == 'onlyCnet' then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
     pnet_copy = model.pnet
   end
 
@@ -396,13 +391,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
       end
       plot_training_progress(snapshot_prefix, training_stats)
       evaluation( model, training_data, optimState, i)
-
-      --[[
-      graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
-      graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
-      graph.dot(model.pnet.fg, 'pnet', string.format('%s/pnet_fg',opt.resultDir))
-      graph.dot(model.pnet.bg, 'pnet', string.format('%s/pnet_bg',opt.resultDir))
-      ]]
 
       confusion_pcls:zero()
       confusion_ccls:zero()

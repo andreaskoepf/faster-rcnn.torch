@@ -49,7 +49,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
   -- ## temp constant batch for testing
   --local dummy_batch = batch_iterator:nextTraining()
 
-  local lambda = 5    -- weight for box proposal regression
+  local lambda = 1    -- weight for box proposal regression
 
   local function lossAndGradient(w)
     if w ~= weights then
@@ -76,7 +76,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
       local p = x.positive        -- get positive and negative anchors examples
       local n = x.negative
-
+      local outputs
       -- run forward convolution
       if mode ~= 'onlyCnet' then
         outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
@@ -180,7 +180,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
           --if false then
           local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
-          local cctarget = torch.CudaTensor(#roi_pool_state)
+          local cctarget = torch.CudaTensor(#roi_pool_state):zero()
           local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
 
           for i,x in ipairs(roi_pool_state) do
@@ -201,7 +201,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           local coutputs = cnet:forward(cinput)
 
           -- compute classification and regression error and run backward pass
-          local lambda = 10
+          lambda = 10
           local crout = coutputs[1]
           crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
           creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
