@@ -238,12 +238,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
     -- scale gradient
     if cls_count ~= 0 then
-      if mode ~= 'onlyCnet' then 
-        gradient:div(cls_count) -- will divide all elements of gradient with cls_count in-place
-      end
-      if mode == 'onlyCnet' then 
-        gradient:div(ccls_count) -- will divide all elements of gradient with cls_count in-place
-      end
+      gradient:div(cls_count) -- will divide all elements of gradient with cls_count in-place
     end
 
     local pcls = cls_loss    -- proposal classification (bg/fg)
