@@ -5,8 +5,9 @@ require 'Anchors'
 
 local Detector = torch.class('Detector')
 
-function Detector:__init(model, mode)
+function Detector:__init(model, mode, pnet_copy)
   self.mode = mode or 'both'
+  self.pnet_copy = pnet_copy or nil
   local cfg = model.cfg
   self.model = model
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
@@ -70,19 +71,21 @@ function Detector:detect(input)
 
   end
 
+  local winners = {}
+  
   if self.mode == 'onlyPnet' then
     return matches
   else
-    local winners = {}
     if #matches > 0 then
 
+      --local candidates = matches
+      
       -- NON-MAXIMUM SUPPRESSION
       local bb = torch.Tensor(#matches, 4)
       local score = torch.Tensor(#matches, 1)
       for i=1,#matches do
         bb[i] = matches[i].r:totensor()
         score[i] = matches[i].p
-
       end
 
       local iou_threshold = 0.25 --FIXME =0.25
@@ -90,8 +93,6 @@ function Detector:detect(input)
       --local pick = nms(bb, iou_threshold, 'area')
       local candidates = {}
       pick:apply(function (x) table.insert(candidates, matches[x]) end )
-
-
       --print(string.format('[Detector:detect] candidates: %d', #candidates))
 
       -- REGION CLASSIFICATION
@@ -102,15 +103,19 @@ function Detector:detect(input)
       for i,v in ipairs(candidates) do
         -- pass through adaptive max pooling operation
         local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[#outputs])
-        cinput[i] = amp:forward(pi):view(cfg.roi_pooling.kw * cfg.roi_pooling.kh * cnet_input_planes)
+        local po = amp:forward(pi):view(cfg.roi_pooling.kh * cfg.roi_pooling.kw * cnet_input_planes)
+        cinput[i] = po
       end
 
       -- send extracted roi-data through classification network
       local coutputs = cnet:forward(cinput)
       local bbox_out = coutputs[1]
-      local cls_out = coutputs[2]
-      local c_norm= m:forward(cls_out)
-      local yclass = {}
+      local cls_out = coutputs[2] -- This already is a LogSoftmax!!!
+      
+      local c_norm= torch.exp(-1 * cls_out) -- Conversion of LogSoftMax into SoftMax
+      
+      yclass = {}
+      
       for i,x in ipairs(candidates) do
         x.r2 = Anchors.anchorToInput(x.r, bbox_out[i])
 
@@ -119,33 +124,34 @@ function Detector:detect(input)
 
         x.class = c[1]
         x.confidence = p[1]
-        -- print(x.class)
+        --print(string.format('x.class = %d', x.class))
         --if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
-          --if x.class ~= bgclass and x.confidence > 0.2 then
-          if not yclass[x.class] then
-            yclass[x.class] = {}
-          end
-
-          table.insert(yclass[x.class], x)
+        --if x.class ~= bgclass and x.confidence > 0.2 then
+          table.insert(yclass, x)
         --end
       end
 
+      --print(string.format('[Detector:detect] yclass: %d', #yclass))
 
       local overlab = 0.2
       -- run per class NMS
-      for i,c in pairs(yclass) do
-        -- fill rect tensor
-        bb = torch.Tensor(#c, 5)
-        for j,r in ipairs(c) do
-          bb[{j, {1,4}}] = r.r2:totensor()
-          bb[{j, 5}] = r.confidence
-        end
+      --for i,c in pairs(yclass) do
+      --  -- fill rect tensor
+      --  bb = torch.Tensor(#c, 5)
+      --  for j,r in ipairs(c) do
+      --    bb[{j, {1,4}}] = r.r2:totensor()
+      --    bb[{j, 5}] = r.confidence
+      --  end
 
-        pick = nms(bb, overlab, bb[{{}, 5}])
-        pick:apply(function (x) table.insert(winners, c[x]) end )
-      end
-    end
+      --  pick = nms(bb, overlab, bb[{{}, 5}])
+      --  pick:apply(function (x) table.insert(winners, c[x]) end )
+      --end
+      
+      winners = yclass
+      
+    end -- if #matches > 0
 
+    --print(string.format('[Detector:detect] winners: %d', #winners))
     return winners
   end -- if mode ~= 'onlyPnet' then
 
