@@ -54,9 +54,7 @@ function Detector:detect(input)
          -- local c = lsm:forward(cls_out)
           --if c[1] > c[2] then
           local c_norm= m:forward(cls_out)
-          if math.exp(c[1]) > 0.5 and math.exp(c[1])> math.exp(c[2]) then  -- only two classes (foreground and background)
-
-          --if c_norm[1] >c_norm[2] and c_norm[1]>0.5 then  -- only two classes (foreground and background)
+         if c_norm[1] >c_norm[2] then  -- only two classes (foreground and background)
 
             -- regression
             local a_ = self.anchors:get(i,a,y,x)

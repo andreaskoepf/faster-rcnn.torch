@@ -213,7 +213,7 @@ function BatchIterator:nextTraining(count)
     local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, targNumNeg) --20160306 16
     local count = #positive + #negative
     print(string.format("Generated %d Positive patches and %d negativbe patches from image '%s'. ",#positive, #negative , fn))
-    if cfg.nearby_aversion then
+    --[[if cfg.nearby_aversion then
       local nearby_negative = {}
       -- add all nearby negative anchors
       for i,p in ipairs(positive) do
@@ -232,11 +232,11 @@ function BatchIterator:nextTraining(count)
       --  table.insert(negative, nearby_negative[i])
       --  count = count + 1
       --end
-    end
+    end]]
 
     -- debug boxes
     if false then
-      local dimg = img 
+      local dimg = img:clone()
       if color_space == 'yuv' then
         dimg = image.yuv2rgb(img)
       elseif color_space == 'lab' then
@@ -246,12 +246,12 @@ function BatchIterator:nextTraining(count)
       end
 
       local red = torch.Tensor({1,0,0})
+      local green = torch.Tensor({0,1,0})
       local white = torch.Tensor({1,1,1})
 
       for i=1,#negative do
         draw_rectangle(dimg, negative[i][1], red)
       end
-      local green = torch.Tensor({0,1,0})
       for i=1,#positive do
         draw_rectangle(dimg, positive[i][1], green)
       end
@@ -263,11 +263,14 @@ function BatchIterator:nextTraining(count)
     end
 
     table.insert(batch, { img = img, positive = positive, negative = negative, rois = rois })
-   -- print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
+    -- uncomment for debug info about image loading
+    --print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
     return count
   end
 
   -- add a background examples
+
+  --[[
   if #self.background.list > 0 then
     local fn = next_entry(self.background)
     local status, img = pcall(function () return load_image(fn, cfg.color_space, cfg.background_base_path) end)
@@ -277,7 +280,7 @@ function BatchIterator:nextTraining(count)
       if img_size[2] >= 128 and img_size[3] >= 128 then
         local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
         local negative = self.anchors:sampleNegative(img_rect, {}, 0, math.floor(count * 0.05))   -- add 5% negative samples per batch
-        table.insert(batch, { img = img, positive = {}, negative = negative})
+        table.insert(batch, { img = img, positive = {}, negative = negative })
         count = count - #negative
         print(string.format('background: %s (%dx%d)', fn, img_size[3], img_size[2]))
       end
@@ -286,6 +289,7 @@ function BatchIterator:nextTraining(count)
       print(string.format("Invalid image '%s': %s", fn, img))
     end
   end
+]]
 
   while count > 0 do
     count = count - try_add_next()

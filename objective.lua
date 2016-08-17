@@ -76,12 +76,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     cnet:training()
 
     local batch = batch_iterator:nextTraining()
-    local target = torch.Tensor(1,2):zero()
-    target[{1,1}] = 1
-    target[{1,2}] = 0
-    local clsOutput = torch.Tensor(1,2):zero()
-    clsOutput[{1,1}] = 1
-    clsOutput[{1,2}] = 0
+    local target = torch.Tensor({{1,0}})
+    local clsOutput = torch.Tensor({{1,0}})
     --gradient:zero()
     for i,x in ipairs(batch) do
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
@@ -108,9 +104,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
       local input_size = img:size()
       local cnetgrad
 
-      target[{1,1}] = 1
-      target[{1,2}] = 0
-      local lambda = 1
+      target = torch.Tensor({{1,0}})
+      
+      local lambda = 5
       -- process positive set
       for i,x in ipairs(p) do
         local anchor = x[1]
@@ -119,8 +115,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
 
         local out = outputs[l]
         local delta_out = delta_outputs[l]
-
-        local idx = anchor.index
+        local idx = anchor.index--anchor.index
         local v = out[idx]
         local d = delta_out[idx]
 
@@ -137,8 +132,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
 
-        reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target)* lambda-- * 10
-        local dr = smoothL1:backward(reg_out, reg_target)* lambda --* 10
+        reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda-- * 10
+        local dr = smoothL1:backward(reg_out, reg_target) * lambda --* 10
         d[{{3,6}}]:add(dr)
         
         -- pass through adaptive max pooling operation
@@ -148,8 +143,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
         table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
       end
       
-      target[{1,1}] = 0
-      target[{1,2}] = 1
+      target = torch.Tensor({{0,1}})
       -- process negative
       for i,x in ipairs(n) do
         local anchor = x[1]
