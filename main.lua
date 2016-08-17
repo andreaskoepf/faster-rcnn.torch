@@ -396,7 +396,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
         print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
       end
       plot_training_progress(snapshot_prefix, training_stats)
-      evaluation( model, training_data, optimState, i)
+      evaluation(model, pnet_copy, training_data, optimState, i)
 
       confusion_pcls:zero()
       confusion_ccls:zero()
@@ -442,7 +442,7 @@ function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_spa
 end
 
 
-function evaluation(model, training_data,optimState,epoch)
+function evaluation(model, pnet_copy, training_data, optimState, epoch)
   local batch_iterator = BatchIterator.new(model, training_data)
 
   local red = torch.Tensor({1,0,0})
@@ -452,7 +452,7 @@ function evaluation(model, training_data,optimState,epoch)
   local colors = { red, green, blue, white }
 
   -- create detector
-  local d = Detector(model,opt.mode)
+  local d = Detector(model, opt.mode, pnet_copy)
   local npos = 0
   local tp = torch.zeros(20)
   local fp = torch.zeros(20)
