@@ -146,7 +146,8 @@ function combine_and_flatten_parameters(...)
   return nn.Module.flatten(parameters), nn.Module.flatten(gradParameters)
 end
 
-function draw_rectangle(img, rect,label, color)
+function draw_rectangle(img, rect, color, label)
+  label = label  or ""
   local sz = img:size()
 
   local x0 = math.max(1, rect.minX)

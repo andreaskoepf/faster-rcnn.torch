@@ -238,35 +238,11 @@ function load_model2(cfg, model_path, network_filename, cuda)
   elseif opt.mode == 'both' then
     return model, weights[1], gradient, training_stats
   end
-  
+
 end
 
 
-function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
-  local training_data = load_obj(training_data_filename)
-  local file_names = keys(training_data.ground_truth)
-  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)",
-    training_data.dataset_name,
-    #file_names,
-    #training_data.class_names,
-    #training_data.background_files))
-
-  -- create/load model
-  local model, weights, gradient, training_stats = load_model2(cfg, model_path, network_filename, true)
-  if not training_stats then
-    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-  end
-
-  local pnet_copy = nil
-  if opt.mode == 'onlyCnet' then
-    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-    pnet_copy = model.pnet
-  end
-
-  local batch_iterator = BatchIterator.new(model, training_data)
-  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode, pnet_copy)
-
-  print '==> configuring optimizer'
+local function get_optimizer()
   local optimState, optimMethod, learnSchedule
   if opt.opti == 'CG' then
     optimState = {
@@ -346,6 +322,36 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   else
     error('unknown optimization method')
   end
+  return optimMethod,optimState,learnSchedule
+end
+
+
+function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
+  local training_data = load_obj(training_data_filename)
+  local file_names = keys(training_data.ground_truth)
+  print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)",
+    training_data.dataset_name,
+    #file_names,
+    #training_data.class_names,
+    #training_data.background_files))
+
+  -- create/load model
+  local model, weights, gradient, training_stats = load_model2(cfg, model_path, network_filename, true)
+  if not training_stats then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
+  end
+
+  local pnet_copy = nil
+  if opt.mode == 'onlyCnet' then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
+    pnet_copy = model.pnet
+  end
+
+  local batch_iterator = BatchIterator.new(model, training_data)
+  local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode, pnet_copy)
+
+  print '==> configuring optimizer'
+  local optimMethod,optimState,learnSchedule = get_optimizer()
 
   for i=1,50000 do
 
@@ -406,6 +412,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   -- compute positive anchors, add anchors to ground-truth file
 end
 
+
 function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_space)
   local img = image.load(path.join(base_path, fn), 3, 'float')
   local dim = img:size()
@@ -433,6 +440,7 @@ function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_spa
 
   return img, dim
 end
+
 
 function evaluation(model, training_data,optimState,epoch)
   local batch_iterator = BatchIterator.new(model, training_data)
@@ -472,14 +480,14 @@ function evaluation(model, training_data,optimState,epoch)
     end
     -- draw bounding boxes and save image
     for i,m in ipairs(matches) do
-      if m.class == 201 then
-        draw_rectangle(img, m.r,string.format("CI: %d",m.class), red)
+      if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
+        draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
       else
-        draw_rectangle(img, m.r,string.format("CI: %d",m.class), green)
+        draw_rectangle(img, m.r, green, string.format("CI: %d",m.class or 0))
       end
     end
     for ii = 1,#b.rois do
-      draw_rectangle(img, b.rois[ii].rect,string.format("CI: %d",b.rois[ii].class_index), white)
+      draw_rectangle(img, b.rois[ii].rect, white, string.format("CI: %d",b.rois[ii].class_index))
     end
 
     image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
@@ -548,4 +556,3 @@ end
 
 
 graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
---evaluation_demo(cfg, opt.model, opt.train, opt.restore)
