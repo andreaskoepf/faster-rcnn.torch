@@ -110,9 +110,10 @@ function Detector:detect(input)
       -- send extracted roi-data through classification network
       local coutputs = cnet:forward(cinput)
       local bbox_out = coutputs[1]
-      local cls_out = coutputs[2] -- This already is a LogSoftmax!!!
+      local cls_out = coutputs[2]
       
-      local c_norm= torch.exp(-1 * cls_out) -- Conversion of LogSoftMax into SoftMax
+      --local c_norm = torch.exp(-1 * cls_out) -- Conversion of LogSoftMax into SoftMax
+      local c_norm = m:forward(cls_out)
       
       yclass = {}
       
@@ -120,14 +121,18 @@ function Detector:detect(input)
         x.r2 = Anchors.anchorToInput(x.r, bbox_out[i])
 
         local cprob = c_norm[i]
-        local p,c = torch.sort(cprob, 1, true) -- get probabilities and class indicies
+        local p_winner, c_winner = torch.max(cprob, 1) -- get max probability and class index
 
-        x.class = c[1]
-        x.confidence = p[1]
+        x.class = c_winner[1]
+        x.confidence = p_winner[1]
         --print(string.format('x.class = %d', x.class))
         --if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
         --if x.class ~= bgclass and x.confidence > 0.2 then
-          table.insert(yclass, x)
+        if not yclass[x.class] then
+          yclass[x.class] = {}
+        end
+        
+        table.insert(yclass[x.class], x)
         --end
       end
 
