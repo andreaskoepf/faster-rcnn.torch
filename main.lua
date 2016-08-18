@@ -223,7 +223,7 @@ function load_model2(cfg, model_path, network_filename, cuda)
   local weights = {}
   local gradient
   -- combine parameters from pnet and cnet into flat tensors
-  weights[1], gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
+  weights[1], gradient = combine_and_flatten_parameters(model.pnet)
   local training_stats
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
@@ -515,7 +515,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
         if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
           draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
         else
-          draw_rectangle(img, m.r, green, string.format("CI: %d",m.class or 0))
+          draw_rectangle(img, m.r2, green, string.format("CI: %d",m.class or 0))
         end
       end
       for ii = 1,#b.rois do

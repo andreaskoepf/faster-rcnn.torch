@@ -265,6 +265,7 @@ function BatchIterator:nextTraining(count)
         draw_rectangle_old(dimg, positive[i][1], green)
       end
       image.saveJPG(string.format('GTBoxesWithPosAnchors/groundTruthBoxes_with_positive_anchors_%d.jpg', self.training.i), dimg)
+
     end
 
     table.insert(batch, { img = img, positive = positive, negative = negative, rois = rois })
