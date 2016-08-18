@@ -194,7 +194,7 @@ function load_model1(cfg, model_path, network_filename, cuda)
   end
 
   -- combine parameters from pnet and cnet into flat tensors
-  local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
+  local weights, gradient = combine_and_flatten_parameters(model.pnet)
   local training_stats
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
@@ -460,8 +460,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       local v
 
       if opt.mode ~= 'onlyPnet' then
-        tp[i],fp[i],v = evaluateTpFp(matches,b)
-        npos = npos + v
+        --tp[i],fp[i],v = evaluateTpFp(matches,b)
+        --npos = npos + v
       end
 
       if color_space == 'yuv' then
@@ -474,7 +474,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
 
       -- draw bounding boxes and save image
       for i,m in ipairs(matches) do
-        if m.class == 201 then
+        if m.class == cfg.backgroundClass then
           --draw_rectangle_old(img, m.r, red)
           draw_rectangle(img, m.r, red, string.format("%d", m.class or 0))
         else
@@ -498,8 +498,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       local v
 
       if opt.mode ~= 'onlyPnet' then
-        tp[i],fp[i],v = evaluateTpFp(matches,b)
-        npos = npos + v
+        --tp[i],fp[i],v = evaluateTpFp(matches,b)
+        --npos = npos + v
       end
 
       if color_space == 'yuv' then

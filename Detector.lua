@@ -78,10 +78,10 @@ function Detector:detect(input)
   else
     if #matches > 0 then
 
-      --local candidates = matches
+      local candidates = matches
       
       -- NON-MAXIMUM SUPPRESSION
-      local bb = torch.Tensor(#matches, 4)
+      --[[local bb = torch.Tensor(#matches, 4)
       local score = torch.Tensor(#matches, 1)
       for i=1,#matches do
         bb[i] = matches[i].r:totensor()
@@ -94,7 +94,7 @@ function Detector:detect(input)
       local candidates = {}
       pick:apply(function (x) table.insert(candidates, matches[x]) end )
       --print(string.format('[Detector:detect] candidates: %d', #candidates))
-
+      --]]
       -- REGION CLASSIFICATION
       cnet:evaluate()
 
@@ -113,15 +113,15 @@ function Detector:detect(input)
       local cls_out = coutputs[2]
       
       --local c_norm = torch.exp(-1 * cls_out) -- Conversion of LogSoftMax into SoftMax
-      local c_norm = m:forward(cls_out)
+      local c_norm = cls_out--m:forward(cls_out)
       
-      yclass = {}
+      local yclass = {}
       
       for i,x in ipairs(candidates) do
         x.r2 = Anchors.anchorToInput(x.r, bbox_out[i])
 
         local cprob = c_norm[i]
-        local p_winner, c_winner = torch.max(cprob, 1) -- get max probability and class index
+        local p_winner, c_winner = cprob:max(1) -- get max probability and class index
 
         x.class = c_winner[1]
         x.confidence = p_winner[1]
@@ -132,7 +132,7 @@ function Detector:detect(input)
           yclass[x.class] = {}
         end
         table.insert(yclass[x.class], x)
-        -- table.insert(yclass, x)
+        --table.insert(yclass, x)
         --end
       end
 
@@ -140,7 +140,7 @@ function Detector:detect(input)
       --print('yclass:')
       --print(yclass)
       
-      local overlab = 0.2
+      local overlab = 0.7
       -- run per class NMS
       for i,c in pairs(yclass) do
         -- fill rect tensor
