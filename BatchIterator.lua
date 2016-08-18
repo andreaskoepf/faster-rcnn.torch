@@ -75,8 +75,9 @@ local function crop(img, rois, rect)
   )
 end
 
-function BatchIterator:__init(model, training_data)
+function BatchIterator:__init(model, training_data, oneBatchTraining)
   local cfg = model.cfg
+  self.oneBatchTraining = oneBatchTraining
 
   -- bounding box data (defined in pixels on original image)
   self.ground_truth = training_data.ground_truth
@@ -165,6 +166,14 @@ end
 
 function BatchIterator:nextTraining(count)
 
+  if self.oneBatchTraining == 'true' then
+    self.training.i = 1 -- Training with only the first batch of images!!!
+                        -- This is for testing e.g. the detection net classification,
+                        -- because when training with only the first batch of images,
+                        -- the network learns the training data much faster and
+                        -- the training error should go down very soon.
+  end
+
   local cfg = self.cfg
   local batch = {}
   count = count or cfg.batch_size
@@ -240,19 +249,25 @@ function BatchIterator:nextTraining(count)
       local green = torch.Tensor({0,1,0})
       local white = torch.Tensor({1,1,1})
 
-      for i=1,#negative do
-        draw_rectangle(dimg, negative[i][1], red)
-      end
-      for i=1,#positive do
-        draw_rectangle(dimg, positive[i][1], green)
-      end
+      image.saveJPG(string.format('trainingImages_without_boxes/trainingImg_%d.jpg', self.training.i), dimg)
+      --for i=1,#negative do
+      --  draw_rectangle(dimg, negative[i][1], red)
+      --end
+      --for i=1,#positive do
+      --  draw_rectangle(dimg, positive[i][1], green)
+      --end
       for i=1,#rois do
         draw_rectangle(dimg, rois[i].rect, white)
       end
-      image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
+      --image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
+      image.saveJPG(string.format('groundTruthBoxes/groundTruthBoxes_%d.jpg', self.training.i), dimg)
+      for i=1,#positive do
+        draw_rectangle_old(dimg, positive[i][1], green)
+      end
+      image.saveJPG(string.format('GTBoxesWithPosAnchors/groundTruthBoxes_with_positive_anchors_%d.jpg', self.training.i), dimg)
     end
 
-    table.insert(batch, { img = img, positive = positive, negative = negative })
+    table.insert(batch, { img = img, positive = positive, negative = negative, rois = rois })
 
     -- uncomment for debug info about image loading
     --print(string.format("'%s' (%dx%d); p: %d; n: %d", fn, img_size[3], img_size[2], #positive, #negative))
