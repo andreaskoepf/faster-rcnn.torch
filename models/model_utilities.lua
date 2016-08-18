@@ -140,7 +140,7 @@ function create_classification_net(inputs, class_count, class_layers)
   -- classification output
   local cnet = nn.Sequential()
   cnet:add(nn.Linear(prev_input_count, class_count))
-  cnet:add(nn.LogSoftMax())
+  --cnet:add(nn.LogSoftMax())
   local cout = cnet(node)
 
   -- create bbox finetuning + classification output
