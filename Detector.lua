@@ -123,8 +123,9 @@ function Detector:detect(input)
         local cprob = c_norm[i]
         local p_winner, c_winner = cprob:max(1) -- get max probability and class index
 
-        x.class = c_winner[1]
-        x.confidence = p_winner[1]
+
+        x.class = c_winner[1] -- c[1]
+        x.confidence = p_winner[1] -- p[1]
         --print(string.format('x.class = %d', x.class))
         --if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
         --if x.class ~= bgclass and x.confidence > 0.2 then
