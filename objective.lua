@@ -167,7 +167,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         if mode ~= 'onlyPnet' then
           local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
           local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-          table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
+          --table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
         end
       end
 
