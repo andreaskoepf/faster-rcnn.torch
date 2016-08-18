@@ -21,7 +21,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
   local anchors = batch_iterator.anchors
   local localizer = Localizer.new(pnet.outnode.children[1])
 
-  local softmax = nn.CrossEntropyCriterion():cuda()
+  local crossEntropy = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
   local smoothL1 = nn.SmoothL1Criterion():cuda()
   --local smoothL1 = nn.MSECriterion():cuda()
@@ -118,8 +118,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- foreground/background classification
         if mode ~= 'onlyCnet' then
-          cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 1)
-          local dc = softmax:backward(v[{{1, 2}}], 1)
+          cls_loss = cls_loss + crossEntropy:forward(v[{{1, 2}}], 1)
+          local dc = crossEntropy:backward(v[{{1, 2}}], 1)
           d[{{1,2}}]:add(dc)
         end
 
@@ -156,8 +156,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local d = delta_out[idx]
 
         if mode ~= 'onlyCnet' then
-          cls_loss = cls_loss + softmax:forward(v[{{1, 2}}], 2)
-          local dc = softmax:backward(v[{{1, 2}}], 2)
+          cls_loss = cls_loss + crossEntropy:forward(v[{{1, 2}}], 2)
+          local dc = crossEntropy:backward(v[{{1, 2}}], 2)
           d[{{1,2}}]:add(dc)
         end
 
@@ -207,15 +207,12 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
           local crdelta = smoothL1:backward(crout, crtarget) * lambda
 
-          local ccout = coutputs[2]  -- log softmax classification
+          local ccout = coutputs[2]
 
-          --criterion ClassNLL
-          local loss = cnll:forward(ccout, cctarget)
+          --criterion CrossEntropy
+          local loss = crossEntropy:forward(ccout, cctarget)
           ccls_loss = ccls_loss + loss
-          local ccdelta = cnll:backward(ccout, cctarget)
-
-          --[[ ccls_loss = ccls_loss + softmax:forward(ccout, cctarget)
-          local ccdelta = softmax:backward(ccout, cctarget)--]]
+          local ccdelta = crossEntropy:backward(ccout, cctarget)
 
           local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
 
