@@ -35,6 +35,7 @@ cmd:option('-plot', 100, 'plot training progress interval')
 cmd:option('-lr', 1E-3, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
 cmd:option('-opti', 'adam', 'Optimizer')
+cmd:option('-oneBatchTraining', 'false', 'training with only one batch')
 cmd:option('-resultDir', 'logs', 'Folder for storing all result. (training progress etc.)')
 
 cmd:text('=== Misc ===')
@@ -347,7 +348,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     pnet_copy = model.pnet
   end
 
-  local batch_iterator = BatchIterator.new(model, training_data)
+  local batch_iterator = BatchIterator.new(model, training_data, opt.oneBatchTraining)
   local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode, pnet_copy)
 
   print '==> configuring optimizer'
@@ -396,7 +397,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
         print(string.format('training cnet confusion: %s',tostring(confusion_ccls)))
       end
       plot_training_progress(snapshot_prefix, training_stats)
-      evaluation(model, pnet_copy, training_data, optimState, i)
+      evaluation(model, pnet_copy, training_data, optimState, batch_iterator, i, opt.oneBatchTraining)
 
       confusion_pcls:zero()
       confusion_ccls:zero()
@@ -442,9 +443,8 @@ function load_image_auto_size(fn, target_smaller_side, max_pixel_size, color_spa
 end
 
 
-function evaluation(model, pnet_copy, training_data, optimState, epoch)
-  local batch_iterator = BatchIterator.new(model, training_data)
-
+function evaluation(model, pnet_copy, training_data, optimState, batch_iterator, epoch, oneBatchTraining)
+  -- create colors for bounding box drawing
   local red = torch.Tensor({1,0,0})
   local green = torch.Tensor({0,1,0})
   local blue = torch.Tensor({0,0,1})
@@ -458,40 +458,80 @@ function evaluation(model, pnet_copy, training_data, optimState, epoch)
   local fp = torch.zeros(20)
   local save = opt.resultDir
 
-  for i=1,20 do
-    --print(string.format('[Main:evaluation] iteration: %d',i))
-    -- pick random validation image
-    local b = batch_iterator:nextValidation(1)[1]
-    local img = b.img:cuda()
-    local matches = d:detect(img)
-    local v
+  if oneBatchTraining == 'true' then
+    local batch = batch_iterator:nextTraining()
+    for i,b in ipairs(batch) do
+      local img = b.img:cuda()
+      local matches = d:detect(img)
+      --print(string.format('#matches = %d', #matches))
+      local v
 
-    if opt.mode ~= 'onlyPnet' then
-      tp[i],fp[i],v = evaluateTpFp(matches,b)
-      npos = npos + v
-    end
-
-    if color_space == 'yuv' then
-      img = image.yuv2rgb(img)
-    elseif color_space == 'lab' then
-      img = image.lab2rgb(img)
-    elseif color_space == 'hsv' then
-      img = image.hsv2rgb(img)
-    end
-    -- draw bounding boxes and save image
-    for i,m in ipairs(matches) do
-      if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
-        draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
-      else
-        draw_rectangle(img, m.r, green, string.format("CI: %d",m.class or 0))
+      if opt.mode ~= 'onlyPnet' then
+        tp[i],fp[i],v = evaluateTpFp(matches,b)
+        npos = npos + v
       end
-    end
-    for ii = 1,#b.rois do
-      draw_rectangle(img, b.rois[ii].rect, white, string.format("CI: %d",b.rois[ii].class_index))
-    end
 
-    image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
-  end -- for i=1,20 do
+      if color_space == 'yuv' then
+        img = image.yuv2rgb(img)
+      elseif color_space == 'lab' then
+        img = image.lab2rgb(img)
+      elseif color_space == 'hsv' then
+        img = image.hsv2rgb(img)
+      end
+
+      -- draw bounding boxes and save image
+      for i,m in ipairs(matches) do
+        if m.class == 201 then
+          --draw_rectangle_old(img, m.r, red)
+          draw_rectangle(img, m.r, red, string.format("%d", m.class or 0))
+        else
+          --draw_rectangle_old(img, m.r, green)
+          draw_rectangle(img, m.r2, green, string.format("%d", m.class or 0))
+        end
+      end
+      for ii = 1,#b.rois do
+        draw_rectangle(img, b.rois[ii].rect, white, string.format("%d", b.rois[ii].class_index))
+      end
+
+      image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+    end -- for i,b in ipairs(batch) do
+  else
+    for i=1,20 do
+      --print(string.format('[Main:evaluation] iteration: %d',i))
+      -- pick random validation image
+      local b = batch_iterator:nextValidation(1)[1]
+      local img = b.img:cuda()
+      local matches = d:detect(img)
+      local v
+
+      if opt.mode ~= 'onlyPnet' then
+        tp[i],fp[i],v = evaluateTpFp(matches,b)
+        npos = npos + v
+      end
+
+      if color_space == 'yuv' then
+        img = image.yuv2rgb(img)
+      elseif color_space == 'lab' then
+        img = image.lab2rgb(img)
+      elseif color_space == 'hsv' then
+        img = image.hsv2rgb(img)
+      end
+
+      -- draw bounding boxes and save image
+      for i,m in ipairs(matches) do
+        if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
+          draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
+        else
+          draw_rectangle(img, m.r, green, string.format("CI: %d",m.class or 0))
+        end
+      end
+      for ii = 1,#b.rois do
+        draw_rectangle(img, b.rois[ii].rect, white, string.format("CI: %d",b.rois[ii].class_index))
+      end
+
+      image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+    end -- for i=1,20 do
+  end -- if oneBatchTraining == 'true' then ... else
 
   if opt.mode ~= 'onlyPnet' then
     local rec, prec, ap = averagePrecision(tp,fp,npos)
