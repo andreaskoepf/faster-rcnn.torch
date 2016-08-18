@@ -356,13 +356,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
 
   for i=1,50000 do
 
-    if opt.mode == 'onlyCnet' then
-      if i == 100 then
-        opt.lr = 1e-6
-        optimState.learningRate = opt.lr
-      end
-    end
-
     if (i % 500) == 0 then
       opt.lr = opt.lr - opt.lr/2
       optimState.learningRate = opt.lr
