@@ -131,28 +131,30 @@ function Detector:detect(input)
         if not yclass[x.class] then
           yclass[x.class] = {}
         end
-        
         table.insert(yclass[x.class], x)
+        -- table.insert(yclass, x)
         --end
       end
 
       --print(string.format('[Detector:detect] yclass: %d', #yclass))
-
+      --print('yclass:')
+      --print(yclass)
+      
       local overlab = 0.2
       -- run per class NMS
-      --for i,c in pairs(yclass) do
-      --  -- fill rect tensor
-      --  bb = torch.Tensor(#c, 5)
-      --  for j,r in ipairs(c) do
-      --    bb[{j, {1,4}}] = r.r2:totensor()
-      --    bb[{j, 5}] = r.confidence
-      --  end
+      for i,c in pairs(yclass) do
+        -- fill rect tensor
+        bb = torch.Tensor(#c, 5)
+        for j,r in ipairs(c) do
+          bb[{j, {1,4}}] = r.r2:totensor()
+          bb[{j, 5}] = r.confidence
+        end
 
-      --  pick = nms(bb, overlab, bb[{{}, 5}])
-      --  pick:apply(function (x) table.insert(winners, c[x]) end )
-      --end
+        pick = nms(bb, overlab, bb[{{}, 5}])
+        pick:apply(function (x) table.insert(winners, c[x]) end )
+      end
       
-      winners = yclass
+      --winners = yclass
       
     end -- if #matches > 0
 
