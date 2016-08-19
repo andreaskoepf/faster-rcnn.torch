@@ -13,18 +13,19 @@ function Detector:__init(model, mode, pnet_copy)
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
   self.localizer = Localizer.new(model.pnet.outnode.children[5])
   self.lsm = nn.LogSoftMax():cuda()
+  self.m = nn.LogSoftMax():cuda()
   self.amp = nn.SpatialAdaptiveMaxPooling(cfg.roi_pooling.kw, cfg.roi_pooling.kh):cuda()
 end
 
 function Detector:detect(input)
   local cfg = self.model.cfg
-  local pnet = self.model.pnet
+  local pnet = self.pnet_copy or self.model.pnet
   local cnet = self.model.cnet
   local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
   local bgclass = cfg.class_count + 1   -- background class
   local amp = self.amp
   local lsm = self.lsm
-  local m=nn.SoftMax():cuda()
+  local m = self.m
 
   local cnet_input_planes = self.model.layers[#self.model.layers].filters
 
@@ -41,6 +42,7 @@ function Detector:detect(input)
 
   -- only analyze anchors which are fully inside the input image
   local ranges = self.anchors:findRangesXY(input_rect, input_rect)
+
   for i,r in ipairs(ranges) do
     local layer = outputs[r.layer]
     local a = r.aspect
@@ -55,7 +57,7 @@ function Detector:detect(input)
         -- classification
         local c_prop = m:forward(cls_out)
 
-        if c_prop[1] > 0.7 then  -- only two classes (foreground and background)
+        if c_prop[1] > c_prop[2] then  -- only two classes (foreground and background)
 
           -- regression
           local a_ = self.anchors:get(r.layer, a, y, x)
@@ -72,14 +74,14 @@ function Detector:detect(input)
   end
 
   local winners = {}
-  
+
   if self.mode == 'onlyPnet' then
     return matches
   else
     if #matches > 0 then
 
       local candidates = matches
-      
+
       -- NON-MAXIMUM SUPPRESSION
       --[[local bb = torch.Tensor(#matches, 4)
       local score = torch.Tensor(#matches, 1)
@@ -104,19 +106,19 @@ function Detector:detect(input)
         -- pass through adaptive max pooling operation
         local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[#outputs])
         local po = amp:forward(pi):view(cfg.roi_pooling.kh * cfg.roi_pooling.kw * cnet_input_planes)
-        cinput[i] = po
+        cinput[i] = po:clone()
       end
 
       -- send extracted roi-data through classification network
       local coutputs = cnet:forward(cinput)
       local bbox_out = coutputs[1]
       local cls_out = coutputs[2]
-      
+
       --local c_norm = torch.exp(-1 * cls_out) -- Conversion of LogSoftMax into SoftMax
-      local c_norm = cls_out--m:forward(cls_out)
-      
+      local c_norm = m:forward(cls_out)
+
       local yclass = {}
-      
+
       for i,x in ipairs(candidates) do
         x.r2 = Anchors.anchorToInput(x.r, bbox_out[i])
 
@@ -129,23 +131,29 @@ function Detector:detect(input)
         --print(string.format('x.class = %d', x.class))
         --if x.class ~= bgclass and math.exp(x.confidence) > 0.2 then
         --if x.class ~= bgclass and x.confidence > 0.2 then
-        if not yclass[x.class] then
-          yclass[x.class] = {}
-        end
-        table.insert(yclass[x.class], x)
-        --table.insert(yclass, x)
+        --if x.confidence > 0.8 then
+         
+         --[[ if not yclass[x.class] then
+            yclass[x.class] = {}
+          end
+
+          table.insert(yclass[x.class], x)
+          --]]
+        --end
+        table.insert(yclass, x)
         --end
       end
 
       --print(string.format('[Detector:detect] yclass: %d', #yclass))
       --print('yclass:')
       --print(yclass)
-      
-      local overlab = 0.7
+
+      local overlab = 0.5
       -- run per class NMS
+     --[[
       for i,c in pairs(yclass) do
         -- fill rect tensor
-        bb = torch.Tensor(#c, 5)
+        local bb = torch.Tensor(#c, 5)
         for j,r in ipairs(c) do
           bb[{j, {1,4}}] = r.r2:totensor()
           bb[{j, 5}] = r.confidence
@@ -154,9 +162,9 @@ function Detector:detect(input)
         pick = nms(bb, overlab, bb[{{}, 5}])
         pick:apply(function (x) table.insert(winners, c[x]) end )
       end
-      
-      --winners = yclass
-      
+--]]
+      winners = yclass
+
     end -- if #matches > 0
 
     --print(string.format('[Detector:detect] winners: %d', #winners))
