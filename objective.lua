@@ -67,6 +67,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
     local ccls_loss, ccls_count = 0, 0
 
     -- enable dropouts
+    pnet_copy:training()
     pnet:training()
     cnet:training()
 
@@ -165,9 +166,12 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- pass through adaptive max pooling operation
         if mode ~= 'onlyPnet' then
-          local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
-          local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-          table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
+          local outpnet = v[{{1, 2}}]:reshape(1,2)
+          if outpnet[1][1] > outpnet[1][2] then
+            local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
+            local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
+            table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
+          end
         end
       end
 
@@ -186,6 +190,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           for i,x in ipairs(roi_pool_state) do
             cinput[i] = x.output
             if x.roi then
+              assert(x.roi.class_index ~= bgclass, "error in organizing the class labels!! bgclass has the same label")
               -- positive example
               cctarget[i] = x.roi.class_index
               crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
@@ -201,9 +206,11 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           local coutputs = cnet:forward(cinput)
 
           -- compute classification and regression error and run backward pass
-          lambda = 10
+          lambda = 1
           local crout = coutputs[1]
-          crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
+          if #p < #roi_pool_state then
+            crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
+          end
           creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
           local crdelta = smoothL1:backward(crout, crtarget) * lambda
 
