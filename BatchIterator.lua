@@ -249,7 +249,7 @@ function BatchIterator:nextTraining(count)
       local green = torch.Tensor({0,1,0})
       local white = torch.Tensor({1,1,1})
 
-      image.saveJPG(string.format('trainingImages_without_boxes/trainingImg_%d.jpg', self.training.i), dimg)
+      image.saveJPG(string.format('debug/trainingImg_%d.jpg', self.training.i), dimg)
       --for i=1,#negative do
       --  draw_rectangle(dimg, negative[i][1], red)
       --end
@@ -257,14 +257,14 @@ function BatchIterator:nextTraining(count)
       --  draw_rectangle(dimg, positive[i][1], green)
       --end
       for i=1,#rois do
-        draw_rectangle(dimg, rois[i].rect, white)
+        draw_rectangle(dimg, rois[i].rect, white, "")
       end
       --image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
-      image.saveJPG(string.format('groundTruthBoxes/groundTruthBoxes_%d.jpg', self.training.i), dimg)
+      image.saveJPG(string.format('debug/groundTruthBoxes_%d.jpg', self.training.i), dimg)
       for i=1,#positive do
-        draw_rectangle_old(dimg, positive[i][1], green)
+        draw_rectangle(dimg, positive[i][1], green ,"")
       end
-      image.saveJPG(string.format('GTBoxesWithPosAnchors/groundTruthBoxes_with_positive_anchors_%d.jpg', self.training.i), dimg)
+      image.saveJPG(string.format('debug/groundTruthBoxes_with_positive_anchors_%d.jpg', self.training.i), dimg)
 
     end
 
