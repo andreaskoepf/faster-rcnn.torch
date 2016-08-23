@@ -38,10 +38,33 @@ function Localizer:__init(outnode)
   self.layers = create_layer_info(trace_modules(outnode))
 end
 
-function Localizer:inputToFeatureRect(rect, layer_index)
+function Localizer:inputToFeatureRect(rect, inputImg, featureMap, layer_index)
+
+  -- Output sizes: (see https://github.com/torch/nn/blob/master/doc/convolution.md)
+  -- Conv (i.e. SpatialConvolution) and Pool (i.e. SpatialMaxPooling):
+  -- owidth  = floor((width  + 2*padW - kW) / dW + 1)
+  -- oheight = floor((height + 2*padH - kH) / dH + 1)
+
+  local width  = rect:width()
+  local height = rect:height()
+  local centerX, centerY = rect:center()
+
+  centerX = featureMap:size(3) * centerX / inputImg:size(3)
+  centerY = featureMap:size(2) * centerY / inputImg:size(2)
+
+  local widthForComparison  = featureMap:size(3) * width / inputImg:size(3)
+  local heightForComparison = featureMap:size(2) * height / inputImg:size(2)
+
   layer_index = layer_index or #self.layers
   for i=1,layer_index do
     local l = self.layers[i]
+
+    width  = math.floor((width  + 2*l.padW - l.kW) / l.dW + 1)
+    height = math.floor((height + 2*l.padH - l.kH) / l.dH + 1)
+    -- For the convolution layers 'floor' is correct, but for the maxPooling layers 
+    -- we actually have to take 'ceil', here...
+
+    --[[
     if l.dW < l.kW then
       rect = rect:inflate((l.kW-l.dW), (l.kH-l.dH))
     end
@@ -61,20 +84,53 @@ function Localizer:inputToFeatureRect(rect, layer_index)
     else
       rect.maxY = math.max(math.ceil((rect.maxY-l.kH) / l.dH) + 1, rect.minY+1)
     end
-
+    ]]
   end
+
+  local rect = Rect.fromCenterWidthHeight(centerX, centerY, width, height)
   return rect:snapToInt()
 end
 
-function Localizer:featureToInputRect(minX, minY, maxX, maxY, layer_index)
-  layer_index = layer_index or #self.layers
+
+function Localizer:featureToInputRect(minX, minY, maxX, maxY, inputImg, featureMap, layer_index)
+  local inputImg = inputImg or nil
+  local featureMap = featureMap or nil
+  layer_index = layer_index or #self.layers -- number of layers with a kernel width kW and height kH 
+                                            -- (i.e. number of Spatial Convolution and MaxPooling layers)
+  local width  = maxX - minX
+  local height = maxY - minY
+
+  local centerX = (minX + maxX) / 2
+  local centerY = (minY + maxY) / 2
+  if inputImg ~= nil and featureMap ~= nil then
+    centerX = inputImg:size(3) * centerX / featureMap:size(3)
+    centerY = inputImg:size(2) * centerY / featureMap:size(2)
+  end
+
+  -- Output sizes: (see https://github.com/torch/nn/blob/master/doc/convolution.md)
+  -- Deconv (i.e. SpatialFullConvolution) and Unpool (i.e. SpatialMaxUnpooling):
+  -- owidth  = (width  - 1) * dW - 2*padW + kW + adjW
+  -- oheight = (height - 1) * dH - 2*padH + kH + adjH
+
   for i=layer_index,1,-1 do
     local l = self.layers[i]
-    minX = minX * l.dW - l.padW
+
+    -- This calculation seems to be wrong, but is used by Anchors.lua
+    minX = minX * l.dW - l.padW -- 1*1-1 = 0 --> 0*1-1 = -1 --> -1*1-1 = -2 --> ... --> -74
     minY = minY * l.dH - l.padH
     maxX = maxX * l.dW - l.padW + l.kW - l.dW
     maxY = maxY * l.dH - l.padH + l.kH - l.dH
-  end
-  return Rect.new(minX, minY, maxX, maxY)
-end
 
+    width  = (width  - 1) * l.dW - 2*l.padW + l.kW
+    height = (height - 1) * l.dH - 2*l.padH + l.kH
+  end
+
+  local rect
+  if inputImg ~= nil and featureMap ~= nil then
+    rect = Rect.fromCenterWidthHeight(centerX, centerY, width, height)
+  else
+    -- This calculation seems to be wrong, but is used by Anchors.lua
+    rect = Rect.new(minX, minY, maxX, maxY)
+  end
+  return rect:snapToInt()
+end
