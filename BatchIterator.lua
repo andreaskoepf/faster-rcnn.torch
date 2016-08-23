@@ -105,8 +105,8 @@ function BatchIterator:processImage(img, rois)
 
   -- determine optimal resize
   local img_size = img:size()
-  local tw, th = find_target_size(img_size[3], img_size[2], cfg.target_smaller_side, cfg.max_pixel_size)
-
+  --local tw, th = find_target_size(img_size[3], img_size[2], cfg.target_smaller_side, cfg.max_pixel_size)
+  local tw, th = find_scaled_size(img_size[3], img_size[2], cfg.target_smaller_side) -- change images to uniform size!
   local scale_X, scale_Y = tw / img_size[3], th / img_size[2]
 
   -- random scaling
@@ -115,9 +115,36 @@ function BatchIterator:processImage(img, rois)
     scale_Y = scale_X + (math.random() - 0.5) * aug.aspect_jitter
   end
 
-  img, rois = scale(img, rois, scale_X, scale_Y)
-
+  --img, rois = scale(img, rois, scale_X, scale_Y)
+  -- change images to uniform size!
+  img, rois = transform_example(img, rois, function(img, w, h) return image.scale(img, w * scale_X, h * scale_Y) end, function(r, w, h) return r:scale(scale_X, scale_Y) end)
+  
+  -- change images to uniform size!
+  -- crop image to final size
+  img_size = img:size()
+  if img_size[3] > cfg.target_smaller_side then
+    tw = cfg.target_smaller_side
+    local crop_rect = Rect.fromXYWidthHeight(
+      math.floor((img_size[3]-tw)/2),
+      0,
+      tw,
+      img_size[2]
+    )
+    img, rois = crop(img, rois, crop_rect)
+  end
+  if img_size[2] > cfg.target_smaller_side then
+    th = cfg.target_smaller_side
+    local crop_rect = Rect.fromXYWidthHeight(
+      0,
+      math.floor((img_size[2]-th)/2),
+      img_size[3],
+      th
+    )
+    img, rois = crop(img, rois, crop_rect)
+  end
+  
   -- crop image to final size if we upsampled at least one dimension
+  --[[ change images to uniform size!
   img_size = img:size()
   if img_size[3] > tw or img_size[2] > th then
     tw, th = math.min(tw, img_size[3]), math.min(th, img_size[2])
@@ -129,6 +156,7 @@ function BatchIterator:processImage(img, rois)
     )
     img, rois = crop(img, rois, crop_rect)
   end
+  ]]
 
   -- horizontal flip operation
   if aug.hflip and aug.hflip > 0 then
