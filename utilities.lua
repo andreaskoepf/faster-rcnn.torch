@@ -211,6 +211,21 @@ function find_target_size(orig_w, orig_h, target_smaller_side, max_pixel_size)
   return w, h
 end
 
+function find_scaled_size(orig_w, orig_h, target_smaller_side)
+  local w, h
+  if orig_h < orig_w then
+    -- height is smaller than width, set h to target_size
+    h = target_smaller_side
+    w = math.floor(orig_w * h/orig_h + 0.5)
+  else
+    -- width is smaller than height, set w to target_size
+    w = target_smaller_side
+    h = math.floor(orig_h * w/orig_w + 0.5)
+  end
+  assert(w >= 1 and h >= 1)
+  return w, h
+end
+
 function load_image(fn, color_space, base_path)
   if not path.isabs(fn) and base_path then
     fn = path.join(base_path, fn)
