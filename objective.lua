@@ -2,8 +2,8 @@ require 'cunn'
 require 'BatchIterator'
 require 'Localizer'
 
-function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
-  local r = localizer:inputToFeatureRect(input_rect)
+function extract_roi_pooling_input(input_rect, localizer, inputImg, feature_layer_output)
+  local r = localizer:inputToFeatureRect(input_rect, inputImg, feature_layer_output)
   -- the use of math.min ensures correct handling of empty rects,
   -- +1 offset for top, left only is conversion from half-open 0-based interval
   local s = feature_layer_output:size()
@@ -137,7 +137,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- pass through adaptive max pooling operation
         if mode ~= 'onlyPnet' then
-          local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs[#outputs])
+          local pi, idx = extract_roi_pooling_input(roi.rect, localizer, img, outputs[#outputs])
           local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
           local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
           table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
@@ -168,7 +168,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         if mode ~= 'onlyPnet' then
           local outpnet = v[{{1, 2}}]:reshape(1,2)
           if outpnet[1][1] > outpnet[1][2] then
-            local pi, idx = extract_roi_pooling_input(anchor, localizer, outputs[#outputs])
+            local pi, idx = extract_roi_pooling_input(anchor, localizer, img, outputs[#outputs])
             local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
             table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
           end
