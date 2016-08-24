@@ -447,8 +447,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
   -- create detector
   local d = Detector(model, opt.mode, pnet_copy)
   local npos = 0
-  local tp = torch.zeros(20)
-  local fp = torch.zeros(20)
+  local tp = torch.zeros(100) --torch.zeros(20)
+  local fp = torch.zeros(100) --torch.zeros(20)
   local save = opt.resultDir
 
   if oneBatchTraining == 'true' then
