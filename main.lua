@@ -348,6 +348,10 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     pnet_copy = model.pnet
   end
 
+  for i=1,#model.pnet.outnode.children do
+    print(model.pnet.outnode.children[i]:graphNodeName())
+  end
+
   local batch_iterator = BatchIterator.new(model, training_data, opt.oneBatchTraining)
   local eval_objective_grad = create_objective(model, weights, gradient, batch_iterator, training_stats, confusion_pcls, confusion_ccls, opt.mode, pnet_copy)
 
