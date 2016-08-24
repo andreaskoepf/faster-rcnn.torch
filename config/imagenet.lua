@@ -1,6 +1,7 @@
  local imgnet_cfg = {
   class_count = 200,  -- excluding background class
   target_smaller_side = 224,
+  uniform_image_scaling = true,
   scales = { 48, 96, 172 },
   max_pixel_size = 1000,
   -- normalization = { scaling = true, centering = true, method = 'contrastive', width = 7 },
