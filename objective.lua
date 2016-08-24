@@ -19,7 +19,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
   local bgclass = cfg.backgroundClass or cfg.class_count + 1   -- background class
   local anchors = batch_iterator.anchors
-  local localizer = Localizer.new(pnet.outnode.children[#model.cfg.scales + 1])
+  local localizer = Localizer.new(pnet.outnode.children[#pnet.outnode.children])
 
   local crossEntropy = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
