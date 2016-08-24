@@ -104,7 +104,7 @@ function Detector:detect(input)
       local cinput = torch.CudaTensor(#candidates, cfg.roi_pooling.kw * cfg.roi_pooling.kh * cnet_input_planes)
       for i,v in ipairs(candidates) do
         -- pass through adaptive max pooling operation
-        local pi, idx = extract_roi_pooling_input(v.r, self.localizer, outputs[#outputs])
+        local pi, idx = extract_roi_pooling_input(v.r, self.localizer, input, outputs[#outputs])
         local po = amp:forward(pi):view(cfg.roi_pooling.kh * cfg.roi_pooling.kw * cnet_input_planes)
         cinput[i] = po:clone()
       end
