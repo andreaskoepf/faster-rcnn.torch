@@ -2,7 +2,7 @@ require 'Localizer'
 dofile 'generate_anchor.lua'
 local Anchors = torch.class('Anchors')
 
-local BIN_SIZE = 4   -- granularity for mapping center points to nearby-anchors (for nearby_aversion)
+local BIN_SIZE = 16   -- granularity for mapping center points to nearby-anchors (for nearby_aversion)
 
 function Anchors:__init(proposal_net, scales)
   -- create localizers
@@ -32,7 +32,6 @@ function Anchors:__init(proposal_net, scales)
     --local a = s --/ math.sqrt(2)
 
     local rawAnchor = generate_anchors(torch.Tensor({{math.sqrt(s)}}))
-    print(torch.type(rawAnchor[1][1]))
     local aspects = { {rawAnchor[1][1]:width(),rawAnchor[1][1]:height()}, {rawAnchor[2][1]:width(),rawAnchor[2][1]:height()}, {rawAnchor[3][1]:width(),rawAnchor[3][1]:height()} }--{ { s, s }, { 2*a, a }, { a, 2*a } }
     local l = self.localizers[1]
     for j,b in ipairs(aspects) do
@@ -205,9 +204,7 @@ function Anchors:findPositive(roi_list, clip_rect, pos_threshold, neg_threshold,
         end
       end
     end
-    --print(string.format("number of anchors after IoU eval: %d",#matches))
-    --io.read()
-    --os.exit()
+
     if best_set and best_iou > 0 then
       for i,v in ipairs(best_set) do
         table.insert(matches, { v, roi })
@@ -238,8 +235,7 @@ function Anchors:sampleNegative(image_rect, roi_list, neg_threshold, count)
     anchor_rect.layer = r.layer
     anchor_rect.aspect = r.aspect
     anchor_rect.index = { { r.aspect * 6 - 5, r.aspect * 6 }, r.ly + y - 1, r.lx + x - 1 }
-    --print(anchor_rect)
-    --io.read()
+
     -- test against all rois
     local match = false
     for j,roi in ipairs(roi_list) do
@@ -287,3 +283,90 @@ function Anchors.anchorToInput(anchor, t,center)
   )
 end
 
+
+
+local function _compute_targets(ex_rois, gt_rois, labels)
+  --Compute bounding-box regression targets for an image.
+
+  assert(ex_rois:size(1) == gt_rois:size(1))
+  assert(ex_rois:size(2) == 4)
+  assert(gt_rois:size(2) == 4)
+
+  local targets = Anchors.inputToAnchor(ex_rois, gt_rois)
+  return table.insert(labels[{{}, np.newaxis}], targets)
+end
+
+
+local function _get_bbox_regression_labels(bbox_target_data, num_classes)
+  --[[Bounding-box regression targets (bbox_target_data) are stored in a
+    --compact form N x (class, tx, ty, tw, th)
+
+    This function expands those targets into the 4-of-4*K representation used
+    by the network (i.e. only one class has non-zero targets).
+
+    Returns:
+        bbox_target (ndarray): N x 4K blob of regression targets
+        bbox_inside_weights (ndarray): N x 4K blob of loss weights
+    --]]
+
+  local clss = bbox_target_data[{{}, 1}]
+  local bbox_targets = torch.zeros(clss.size, 4 * num_classes)
+  local bbox_inside_weights = torch.zeros(bbox_targets:size())
+  local inds = clss:gt(0)
+  for ind in inds do
+    local cls = clss[ind]
+    local start = 4 * cls
+    local end_ = start + 4
+    bbox_targets[{ind, {start,end_}}] = bbox_target_data[{ind, {2,}}]
+    bbox_inside_weights[{ind, {start,end_}}] = cfg.TRAIN.BBOX_INSIDE_WEIGHTS
+  end
+  return bbox_targets, bbox_inside_weights
+end
+
+
+local function _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_classes)
+  --Generate a random sample of RoIs comprising foreground and background examples.
+  -- overlaps: (rois x gt_boxes)
+  local overlaps = all_rois:IoU(gt_boxes)
+
+  local gt_assignment, max_overlaps = overlaps:max()
+  local labels = gt_boxes[{gt_assignment, 4}]
+
+  -- Select foreground RoIs as those with >= FG_THRESH overlap
+  local fg_inds = np.where(max_overlaps >= cfg.TRAIN.FG_THRESH)[0]
+  -- Guard against the case when an image has fewer than fg_rois_per_image
+  -- foreground RoIs
+  local fg_rois_per_this_image = math.min(fg_rois_per_image, fg_inds.size)
+  -- Sample foreground regions without replacement
+  if fg_inds.size > 0 then
+  --fg_inds = npr.choice(fg_inds, size=fg_rois_per_this_image, replace=False)
+  end
+
+  -- Select background RoIs as those within [BG_THRESH_LO, BG_THRESH_HI)
+  --bg_inds = np.where((max_overlaps < 0.1) &
+  --                   (max_overlaps >= 0.3))[0]
+  -- Compute number of background RoIs to take from this image (guarding
+  -- against there being fewer than desired)
+  local bg_rois_per_this_image = rois_per_image - fg_rois_per_this_image
+  bg_rois_per_this_image = math.min(bg_rois_per_this_image, bg_inds.size)
+  -- Sample background regions without replacement
+  if bg_inds.size > 0 then
+  --    bg_inds = npr.choice(bg_inds, size=bg_rois_per_this_image, replace=False)
+  end
+
+  -- The indices that we're selecting (both fg and bg)
+  local keep_inds = fg_inds:cat(bg_inds)
+  -- Select sampled values from various arrays:
+  labels = labels[keep_inds]
+  -- Clamp labels for the background RoIs to 0
+  --labels[fg_rois_per_this_image:] = 0
+  local rois = all_rois[keep_inds]
+
+  --bbox_target_data = _compute_targets(
+  --   rois[{{}, {1,5}}], gt_boxes[gt_assignment[keep_inds], :4], labels)
+
+  --bbox_targets, bbox_inside_weights = \
+  --   _get_bbox_regression_labels(bbox_target_data, num_classes)
+
+  return labels, rois, bbox_targets, bbox_inside_weights
+end

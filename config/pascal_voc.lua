@@ -1,7 +1,7 @@
  local pascal_voc_cfg = {
   class_count = 20,  -- excluding background class
   target_smaller_side = 300,
-  scales = { 4, 8, 16 }, 
+  scales = { 16,64, 256 }, 
   max_pixel_size = 500,
   normalization = { centering = false, scaling = false },
   augmentation = { vflip = 0.0, hflip = 0.2, random_scaling = 0.0, aspect_jitter = 0.0 },

@@ -51,14 +51,18 @@ function create_proposal_net(layers, anchor_nets,scales)
     table.insert(conv_outputs, prev)
   end
   
+  local feature_model = nn.gModule({ input }, { conv_outputs[#conv_outputs] })
+
   local proposal_outputs = {}
+  local input = nn.Identity()()
   for i,a in ipairs(anchor_nets) do
-    table.insert(proposal_outputs, AnchorNetwork(layers[a.input].filters, a.n, a.kW,a.dropout)(conv_outputs[a.input]))
+    local A = AnchorNetwork(layers[a.input].filters, a.n, a.kW,a.dropout)
+    table.insert(proposal_outputs, A(input))
   end
-  table.insert(proposal_outputs, conv_outputs[#conv_outputs]) -- insert feature map for ROI pooling
-  
+  --table.insert(proposal_outputs, conv_outputs[#conv_outputs]) -- insert feature map for ROI pooling
     -- create proposal net module, outputs: anchor net outputs followed by last conv-layer output
-  local model = nn.gModule({ input }, proposal_outputs)
+
+  local proposal_model = nn.gModule( { input }, proposal_outputs)
   
   local function init(module, name)
     local function init_module(m)
@@ -72,9 +76,10 @@ function create_proposal_net(layers, anchor_nets,scales)
     module:apply(init_module)
   end
 
-  init(model, 'nn.SpatialConvolution')
+  init(proposal_model, 'nn.SpatialConvolution')
+  init(feature_model, 'nn.SpatialConvolution')
   
-  return model
+  return proposal_model,feature_model
 end
 
 function create_classification_net(inputs, class_count, class_layers)
@@ -129,11 +134,13 @@ end
 
 function create_model(cfg, layers, anchor_nets, class_layers)
   local cnet_ninputs = cfg.roi_pooling.kh * cfg.roi_pooling.kw * layers[#layers].filters
+  local proposal_model,feature_model = create_proposal_net(layers, anchor_nets,#cfg.scales) 
   local model = 
   {
     cfg = cfg,
     layers = layers,
-    pnet = create_proposal_net(layers, anchor_nets,#cfg.scales),
+    fnet = feature_model,
+    pnet = proposal_model,
     cnet = create_classification_net(cnet_ninputs, cfg.class_count + 1, class_layers)
   }
   return model

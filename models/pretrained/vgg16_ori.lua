@@ -21,9 +21,9 @@ function vgg16_ori(cfg)
     { n=512, dropout=0.0 }
   }
   model = create_model(cfg, layers, anchor_nets, class_layers)
-  model.pnet:get(#layers+1):remove(7)
 
-  print(model.pnet:get(#layers+1))
+  model.fnet:get(#layers+1):remove(7)
+  print(model.fnet:get(#layers+1))
   
   -- Load pretrained network:
   ----------------------------
@@ -46,7 +46,7 @@ function vgg16_ori(cfg)
   --print('number of cudnn.SpatialConvolution nodes (pretrained network):')
   --print(#v1)
 
-  for k,v in pairs(model.pnet:findModules(name_nn)) do
+  for k,v in pairs(model.fnet:findModules(name_nn)) do
     v.weight:copy(v1[counter].weight)
     v.bias:copy(v1[counter].bias)
     counter = counter + 1

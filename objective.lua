@@ -18,7 +18,9 @@ function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
 end
 
 function create_objective(model, weights, gradient, batch_iterator, stats,pnet_confusion,cnet_confusion)
+  print("==> create objective")
   local cfg = model.cfg
+  local fnet = model.fnet
   local pnet = model.pnet
   local cnet = model.cnet
   collectgarbage()
@@ -26,10 +28,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
   
   local bgclass = cfg.backgroundClass or cfg.class_count +1   -- background class
   local anchors = batch_iterator.anchors
-  print("create_objective pnet outnode")
-  print(pnet.outnode.children[1].children[1]:graphNodeName())
   --local localizer = Localizer.new(pnet.outnode.children[#pnet.outnode.children])
-  local localizer = Localizer.new(pnet.outnode.children[1].children[1])
+  local localizer = Localizer.new(fnet.outnode)
   
   local softmax = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
@@ -46,7 +46,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
       local anchor = examples[i][1]
       
       --print(outputs)
-      local fmSize = outputs[anchor.layer]:size()
+      local fmSize = outputs:size()
       if anchor.index[2] > fmSize[2] or anchor.index[3] > fmSize[3] then
         table.remove(examples, i)   -- accessing would cause ouf of range exception
       else
@@ -71,25 +71,32 @@ function create_objective(model, weights, gradient, batch_iterator, stats,pnet_c
     local creg_loss, creg_count = 0, 0
     local ccls_loss, ccls_count = 0, 0
 
+    print("==> switch all to training")
     -- enable dropouts
+    fnet:training()
     pnet:training()
     cnet:training()
-
+    print("==> switched all to training")
+    
     local batch = batch_iterator:nextTraining()
+    print("==> batch received")
     local target = torch.Tensor({{1,0}})
     local clsOutput = torch.Tensor({{1,0}})
     --gradient:zero()
     for i,x in ipairs(batch) do
+      print(string.format("==> batch iteration: %d",i))
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
       local p = x.positive        -- get positive and negative anchors examples
       local n = x.negative
       -- run forward convolution
-      local outputs = pnet:forward(img)
-
+      print("features")
+      local features = fnet:forward(img)
+      
+      local outputs = pnet:forward(features)
       -- ensure all example anchors lie withing existing feature planes
       cleanAnchors(n, outputs)
       cleanAnchors(p, outputs)
-
+      print(outputs)
       -- clear delta values for each new image
       for i,out in ipairs(outputs) do
         if not delta_outputs[i] then

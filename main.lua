@@ -99,15 +99,21 @@ function load_model(cfg, model_path, network_filename, cuda)
   -- get configuration & model
   local model_factory = dofile(model_path)
   local model = model_factory(cfg)
+  graph.dot(model.cnet.fg, 'cnet',string.format('%s/cnet_fg',opt.resultDir))
+  graph.dot(model.cnet.bg, 'cnet',string.format('%s/cnet_bg',opt.resultDir))
   graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
   graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
+  graph.dot(model.fnet.fg, 'fnet',string.format('%s/fnet_fg',opt.resultDir))
+  graph.dot(model.fnet.bg, 'fnet',string.format('%s/fnet_bg',opt.resultDir))
+
   if cuda then
     model.cnet:cuda()
     model.pnet:cuda()
+    model.fnet:cuda()
   end
 
   -- combine parameters from pnet and cnet into flat tensors
-  local weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
+  local weights, gradient = combine_and_flatten_parameters(model.fnet,model.pnet, model.cnet)
   local training_stats
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
@@ -191,7 +197,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
 
   for i=1,50000 do
     if i % 100 == 0 then
-      --[[
+    --[[
       resetOptim()
 
       if mode == 3 then
@@ -209,7 +215,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     if mode == 1 then
       print("==> Only the pnet will be optimized")
       --local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.pnet:get(model.pnet:size()))
-      local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.pnet)
+      local weights_pnet, gradient_pnet = combine_and_flatten_parameters(model.fnet,model.pnet)
       local eval_objective_grad_pnet = create_objective(model, weights_pnet, gradient_pnet, batch_iterator, training_stats,confusion_pcls,confusion_ccls)
       _, loss = optimMethod(eval_objective_grad_pnet, weights_pnet, optimState)
     elseif mode == 2 then
@@ -248,10 +254,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
 
       evaluation( model, training_data,optimState,i)
 
-      graph.dot(model.cnet.fg, 'cnet',string.format('%s/cnet_fg',opt.resultDir))
-      graph.dot(model.cnet.bg, 'cnet',string.format('%s/cnet_bg',opt.resultDir))
-      graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
-      graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
 
       confusion_pcls:zero()
       confusion_ccls:zero()
