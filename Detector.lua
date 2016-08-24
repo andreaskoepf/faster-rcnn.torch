@@ -11,7 +11,7 @@ function Detector:__init(model, mode, pnet_copy)
   local cfg = model.cfg
   self.model = model
   self.anchors = Anchors.new(model.pnet, model.cfg.scales)
-  self.localizer = Localizer.new(model.pnet.outnode.children[5])
+  self.localizer = Localizer.new(model.pnet.outnode.children[#model.cfg.scales + 1])
   self.lsm = nn.LogSoftMax():cuda()
   self.m = nn.LogSoftMax():cuda()
   self.amp = nn.SpatialAdaptiveMaxPooling(cfg.roi_pooling.kw, cfg.roi_pooling.kh):cuda()
