@@ -48,6 +48,8 @@ function Localizer:inputToFeatureRect(rect, inputImg, featureMap, layer_index)
   if inputImg ~= nil and featureMap ~= nil then
     centerX = featureMap:size(3) * centerX / inputImg:size(3)
     centerY = featureMap:size(2) * centerY / inputImg:size(2)
+    width = featureMap:size(3) * width / inputImg:size(3)
+    height = featureMap:size(2) * height / inputImg:size(2)
   end
 
   layer_index = layer_index or #self.layers
@@ -59,13 +61,20 @@ function Localizer:inputToFeatureRect(rect, inputImg, featureMap, layer_index)
     -- owidth  = floor((width  + 2*padW - kW) / dW + 1)
     -- oheight = floor((height + 2*padH - kH) / dH + 1)
 
-    width  = math.floor((width  + 2*l.padW - l.kW) / l.dW + 1)
-    height = math.floor((height + 2*l.padH - l.kH) / l.dH + 1)
+    --width  = math.floor((width  + 2*l.padW - l.kW) / l.dW + 1)
+    --height = math.floor((height + 2*l.padH - l.kH) / l.dH + 1)
     -- For the convolution layers 'floor' is correct, but for the maxPooling layers 
     -- we actually have to take 'ceil', here (see model_utilities.lua)...
 
     -- This calculation seems to be wrong, but is used for backward compatibility
     if inputImg == nil or featureMap == nil then
+      
+      rect.minX = (rect.minX + l.padW) / l.dW
+      rect.maxX = (rect.maxX + l.dW - l.kW + l.padW) / l.dW
+      rect.minY = (rect.minY + l.padH) / l.dH
+      rect.maxY = (rect.maxY + l.dH - l.kH + l.padH) / l.dH
+      
+      --[[
       if l.dW < l.kW then
         rect = rect:inflate((l.kW-l.dW), (l.kH-l.dH))
       end
@@ -83,6 +92,7 @@ function Localizer:inputToFeatureRect(rect, inputImg, featureMap, layer_index)
       else
         rect.maxY = math.max(math.ceil((rect.maxY-l.kH) / l.dH) + 1, rect.minY+1)
       end
+      ]]
     end -- end of calculation used for backward compatibility
 
   end -- for i=1,layer_index do
@@ -108,6 +118,8 @@ function Localizer:featureToInputRect(minX, minY, maxX, maxY, inputImg, featureM
   if inputImg ~= nil and featureMap ~= nil then
     centerX = inputImg:size(3) * centerX / featureMap:size(3)
     centerY = inputImg:size(2) * centerY / featureMap:size(2)
+    width = inputImg:size(3) * width / featureMap:size(3)
+    height = inputImg:size(2) * height / featureMap:size(2)
   end
 
   for i=layer_index,1,-1 do
@@ -118,8 +130,8 @@ function Localizer:featureToInputRect(minX, minY, maxX, maxY, inputImg, featureM
     -- owidth  = (width  - 1) * dW - 2*padW + kW + adjW
     -- oheight = (height - 1) * dH - 2*padH + kH + adjH
 
-    width  = (width  - 1) * l.dW - 2*l.padW + l.kW
-    height = (height - 1) * l.dH - 2*l.padH + l.kH
+    --width  = (width  - 1) * l.dW - 2*l.padW + l.kW
+    --height = (height - 1) * l.dH - 2*l.padH + l.kH
 
     -- This calculation seems to be wrong, but is used for backward compatibility
     if inputImg == nil or featureMap == nil then
@@ -137,5 +149,5 @@ function Localizer:featureToInputRect(minX, minY, maxX, maxY, inputImg, featureM
     -- This calculation seems to be wrong, but is used for backward compatibility
     rect = Rect.new(minX, minY, maxX, maxY)
   end
-  return rect:snapToInt()
+  return rect --:snapToInt()
 end
