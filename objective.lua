@@ -77,17 +77,17 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
       local p = x.positive        -- get positive and negative anchors examples
       local n = x.negative
-      local outputs
+      local outputs, outputs_c
       -- run forward convolution
-      if mode ~= 'onlyCnet' then
+      --if mode ~= 'onlyCnet' then
         outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
-      else
-        outputs = pnet_copy:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+      if mode ~= 'onlyPnet' then
+        outputs_c = pnet_copy:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
       end
 
       -- ensure all example anchors lie withing existing feature planes
-      cleanAnchors(n, outputs)
-      cleanAnchors(p, outputs)
+      cleanAnchors(n, outputs_c or outputs)
+      cleanAnchors(p, outputs_c or outputs)
 
       -- clear delta values for each new image
       for i,out in ipairs(outputs) do
@@ -103,7 +103,10 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local cnetgrad
 
       local target = torch.Tensor({{1,0}})
-
+      outputs_c = nil
+      if pnet_copy then
+        outputs_c = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+      end
       -- process positive set
       for i,x in ipairs(p) do
         local anchor = x[1]
@@ -137,7 +140,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- pass through adaptive max pooling operation
         if mode ~= 'onlyPnet' then
-          local pi, idx = extract_roi_pooling_input(roi.rect, localizer, img, outputs[#outputs])
+          local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs_c[#outputs_c] or outputs[#outputs])
           local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
           local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
           table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
@@ -168,7 +171,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         if mode ~= 'onlyPnet' then
           local outpnet = v[{{1, 2}}]:reshape(1,2)
           if outpnet[1][1] > outpnet[1][2] then
-            local pi, idx = extract_roi_pooling_input(anchor, localizer, img, outputs[#outputs])
+            local pi, idx = extract_roi_pooling_input(anchor, localizer_c or localizer, outputs_c[#outputs_c] or outputs[#outputs])
             local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
             table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
           end
