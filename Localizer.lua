@@ -24,130 +24,89 @@ function Localizer:__init(outnode)
     end
     return reverse(modules)
   end
-  
+
   local function create_layer_info(modules)
     local info = {}
     for i,m in ipairs(modules) do
       if m.kW and m.kH then
         table.insert(info, { kW=m.kW, kH=m.kH, dW=m.dW or 1, dH=m.dH or 1, padW=m.padW or 0, padH=m.padH or 0 })
+        print(string.format("Found model information: Index = %d, kW=%d, kH=%d, dW=%d, dH=%d, padW=%d, padH=%d",i,info[#info].kW,info[#info].kH,info[#info].dW,info[#info].dH,info[#info].padW,info[#info].padH))
       end
     end
     return info
   end
-  
+
   self.layers = create_layer_info(trace_modules(outnode))
 end
 
-function Localizer:inputToFeatureRect(rect, inputImg, featureMap, layer_index)
-  local inputImg = inputImg or nil
-  local featureMap = featureMap or nil
-  local width  = rect:width()
-  local height = rect:height()
-  local centerX, centerY = rect:center()
+local function convLayer_inp2feat(cpx,cpy, kW, kH, dW, dH, padW, padH)
+  local cpx_ 
+  local cpy_
+   cpx_ = ((cpx + padW - kW/2) / (dW) + 0.5)
+   cpy_ = ((cpy + padH - kH/2) / (dH) + 0.5)
+  return cpx_,cpy_
+end
 
-  if inputImg ~= nil and featureMap ~= nil then
-    centerX = featureMap:size(3) * centerX / inputImg:size(3)
-    centerY = featureMap:size(2) * centerY / inputImg:size(2)
-    width = featureMap:size(3) * width / inputImg:size(3)
-    height = featureMap:size(2) * height / inputImg:size(2)
-  end
 
+local function convLayer_inp2feat_inv(cpx,cpy, kW, kH, dW, dH, padW, padH)
+  local cpx_ 
+  local cpy_
+   cpx_  = ((cpx - 0.5) * (dW) - padW + kW/2)
+   cpy_  = ((cpy - 0.5) * (dH) - padH + kH/2)  --math.ceil
+  return cpx_,cpy_
+end
+
+local function convLayer_inpRec2featRec(rec, kW, kH, dW, dH, padW, padH)
+
+  local cpx, cpy = rec:center()
+  local cpx_,cpy_ = convLayer_inp2feat(cpx,cpy, kW, kH, dW, dH, padW, padH)
+  local owidth_  = ((rec:width()  + 2 * padW - kW) / dW + 1)
+  local oheight_  = ((rec:height() + 2 * padH - kH) / dH + 1)
+  return Rect.fromCenterWidthHeight(cpx_, cpy_, owidth_, oheight_)
+  
+--[[
+  rec.minX = rec.minX * dW - padW -1 -- 1*1-1 = 0 --> 0*1-1 = -1 --> -1*1-1 = -2 --> ... --> -74
+  rec.minY = rec.minY * dH - padH -1
+  rec.maxX = rec.maxX * dW - padW + kW - dW -1
+  rec.maxY = rec.maxY * dH - padH + kH - dH -1
+  return rec
+  --]]
+end
+
+
+local function convLayer_inpRec2featRec_inv(rec, kW, kH, dW, dH, padW, padH)
+  
+  local cpx, cpy = rec:center()
+  local cpx_,cpy_ = convLayer_inp2feat_inv(cpx,cpy, kW, kH, dW, dH, padW, padH)
+  local owidth_  = (rec:width()  - 1) * dW - 2*padW + kW --rec:width() + dW - kW
+  local oheight_ = (rec:height() - 1) * dH - 2*padH + kH
+  return Rect.fromCenterWidthHeight(cpx_, cpy_, owidth_, oheight_)
+
+--[[
+  rec.minX = (rec.minX + 1 + padW)/dW 
+  rec.minY = (rec.minY + 1 + padH)/dH
+  rec.maxX = (rec.maxX +1 +dW - kW +padW)/dW
+  rec.maxY = (rec.maxY +1 +dH - kH +padH)/dH
+  return rec
+  --]]
+end
+
+function Localizer:inputToFeatureRect(rect, layer_index)
   layer_index = layer_index or #self.layers
   for i=1,layer_index do
     local l = self.layers[i]
-
-    -- Output sizes: (see https://github.com/torch/nn/blob/master/doc/convolution.md)
-    -- Conv (i.e. SpatialConvolution) and Pool (i.e. SpatialMaxPooling):
-    -- owidth  = floor((width  + 2*padW - kW) / dW + 1)
-    -- oheight = floor((height + 2*padH - kH) / dH + 1)
-
-    --width  = math.floor((width  + 2*l.padW - l.kW) / l.dW + 1)
-    --height = math.floor((height + 2*l.padH - l.kH) / l.dH + 1)
-    -- For the convolution layers 'floor' is correct, but for the maxPooling layers 
-    -- we actually have to take 'ceil', here (see model_utilities.lua)...
-
-    -- This calculation seems to be wrong, but is used for backward compatibility
-    if inputImg == nil or featureMap == nil then
-      
-      rect.minX = (rect.minX + l.padW) / l.dW
-      rect.maxX = (rect.maxX + l.dW - l.kW + l.padW) / l.dW
-      rect.minY = (rect.minY + l.padH) / l.dH
-      rect.maxY = (rect.maxY + l.dH - l.kH + l.padH) / l.dH
-      
-      --[[
-      if l.dW < l.kW then
-        rect = rect:inflate((l.kW-l.dW), (l.kH-l.dH))
-      end
-      rect = rect:offset(l.padW, l.padH)
-      -- reduce size, keep only filters that fit completely into the rect (valid convolution)
-      rect.minX = rect.minX / l.dW
-      rect.minY = rect.minY / l.dH
-      if (rect.maxX-l.kW) % l.dW == 0 then
-        rect.maxX = math.max((rect.maxX-l.kW)/l.dW + 1, rect.minX+1)
-      else
-        rect.maxX = math.max(math.ceil((rect.maxX-l.kW) / l.dW) + 1, rect.minX+1)
-      end
-      if (rect.maxY-l.kH) % l.dH == 0 then
-        rect.maxY = math.max((rect.maxY-l.kH)/l.dH + 1, rect.minY+1)
-      else
-        rect.maxY = math.max(math.ceil((rect.maxY-l.kH) / l.dH) + 1, rect.minY+1)
-      end
-      ]]
-    end -- end of calculation used for backward compatibility
-
+    rect = convLayer_inpRec2featRec(rect, l.kW, l.kH, l.dW, l.dH, l.padW, l.padH)
   end -- for i=1,layer_index do
-
-  if inputImg ~= nil and featureMap ~= nil then
-    rect = Rect.fromCenterWidthHeight(centerX, centerY, width, height)
-  end
-
   return rect:snapToInt()
 end
 
 
-function Localizer:featureToInputRect(minX, minY, maxX, maxY, inputImg, featureMap, layer_index)
-  local inputImg = inputImg or nil
-  local featureMap = featureMap or nil
-  layer_index = layer_index or #self.layers -- number of layers with a kernel width kW and height kH 
-                                            -- (i.e. number of Spatial Convolution and MaxPooling layers)
-  local width  = maxX - minX
-  local height = maxY - minY
-
-  local centerX = (minX + maxX) / 2
-  local centerY = (minY + maxY) / 2
-  if inputImg ~= nil and featureMap ~= nil then
-    centerX = inputImg:size(3) * centerX / featureMap:size(3)
-    centerY = inputImg:size(2) * centerY / featureMap:size(2)
-    width = inputImg:size(3) * width / featureMap:size(3)
-    height = inputImg:size(2) * height / featureMap:size(2)
-  end
-
+function Localizer:featureToInputRect(minX, minY, maxX, maxY, layer_index)
+  layer_index = layer_index or #self.layers
+  local rect = Rect.new(minX, minY, maxX, maxY)
   for i=layer_index,1,-1 do
     local l = self.layers[i]
-
-    -- Output sizes: (see https://github.com/torch/nn/blob/master/doc/convolution.md)
-    -- Deconv (i.e. SpatialFullConvolution) and Unpool (i.e. SpatialMaxUnpooling):
-    -- owidth  = (width  - 1) * dW - 2*padW + kW + adjW
-    -- oheight = (height - 1) * dH - 2*padH + kH + adjH
-
-    --width  = (width  - 1) * l.dW - 2*l.padW + l.kW
-    --height = (height - 1) * l.dH - 2*l.padH + l.kH
-
-    -- This calculation seems to be wrong, but is used for backward compatibility
-    if inputImg == nil or featureMap == nil then
-      minX = minX * l.dW - l.padW -- 1*1-1 = 0 --> 0*1-1 = -1 --> -1*1-1 = -2 --> ... --> -74
-      minY = minY * l.dH - l.padH
-      maxX = maxX * l.dW - l.padW + l.kW - l.dW
-      maxY = maxY * l.dH - l.padH + l.kH - l.dH
-    end -- end of calculation used for backward compatibility
+    rect = convLayer_inpRec2featRec_inv(rect, l.kW, l.kH, l.dW, l.dH, l.padW, l.padH)
   end
-
-  local rect
-  if inputImg ~= nil and featureMap ~= nil then
-    rect = Rect.fromCenterWidthHeight(centerX, centerY, width, height)
-  else
-    -- This calculation seems to be wrong, but is used for backward compatibility
-    rect = Rect.new(minX, minY, maxX, maxY)
-  end
-  return rect --:snapToInt()
+  return rect:snapToInt()
 end
