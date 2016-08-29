@@ -234,7 +234,7 @@ function load_model2(cfg, model_path, network_filename, cuda)
     weights[2], gradient = combine_and_flatten_parameters(model.cnet)
     return model, weights[2], gradient, training_stats
   elseif opt.mode == 'onlyPnet' then
-    weights[2], gradient = combine_and_flatten_parameters(model.pnet)
+    weights[2], gradient = combine_and_flatten_parameters(model.pnet,model.cnet)
     return model, weights[2], gradient, training_stats
   elseif opt.mode == 'both' then
     return model, weights[1], gradient, training_stats
@@ -361,8 +361,8 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   for i=1,50000 do
 
     if (i % 500) == 0 then
-      opt.lr = opt.lr - opt.lr/2
-      optimState.learningRate = opt.lr
+      --opt.lr = opt.lr - opt.lr/2
+      --optimState.learningRate = opt.lr
     end
 
     if opt.opti == 'sgd' then
