@@ -148,8 +148,10 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         if mode ~= 'onlyPnet' then
           local reg_proposal = Anchors.anchorToInput(anchor, reg_out) --reg_target
           local pi, idx = extract_roi_pooling_input(reg_proposal, localizer,outputs[#outputs])
-          local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-          table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
+          if pi then
+            local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
+            table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
+          end
         end
       end
 
