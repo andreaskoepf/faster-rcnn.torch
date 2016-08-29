@@ -11,10 +11,10 @@ local Rect = torch.class('Rect')
 
 function Rect:__init(minX, minY, maxX, maxY)
   if type(minX) == 'table' then
-    self.minX = minx.minX
-    self.minY = minx.minY
-    self.maxX = minx.maxX
-    self.maxY = minx.maxY
+    self.minX = minX.minX
+    self.minY = minX.minY
+    self.maxX = minX.maxX
+    self.maxY = minX.maxY
   else
     self.minX = minX
     self.minY = minY
@@ -32,7 +32,7 @@ function Rect.fromXYWidthHeight(x, y, width, height)
 end
 
 function Rect.fromCenterWidthHeight(centerX, centerY, width, height)
-  return Rect.fromXYWidthHeight(centerX - width * 0.5, centerY - height * 0.5, width, height)
+  return Rect.fromXYWidthHeight(math.ceil(centerX - (width * 0.5)), math.ceil(centerY - (height * 0.5)), width, height)
 end
 
 function Rect:scale(factorX, factorY)
@@ -67,7 +67,8 @@ function Rect:center()
 end
 
 function Rect:isEmpty()
-  return self.minX == self.maxX and self.minY == self.maxY
+  --return self.minX == self.maxX and self.minY == self.maxY
+  return self:area() == 0
 end
 
 function Rect:clip(clipRect)
