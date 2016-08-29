@@ -4,7 +4,7 @@
   scales = { 48, 96, 172 },
   max_pixel_size = 1000,
   normalization = { centering = false, scaling = false },
-  augmentation = { vflip = 0.0, hflip = 0.2, random_scaling = 0.0, aspect_jitter = 0.0 },
+  augmentation = { vflip = 0.0, hflip = 0.0, random_scaling = 0.0, aspect_jitter = 0.0 },
   color_space = 'rgb',
   roi_pooling = { kw = 3, kh = 3 },
   examples_base_path = '/data/VOC2007/',
