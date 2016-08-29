@@ -181,7 +181,7 @@ function draw_rectangle(img, rect, color, label)
     img:copy(image.drawText(img:double(),label,x0,y0,{color = {color[1]*255,color[2]*255,color[3]*255}, size =1}))
     img:cuda()
   end
-  --return img
+  return img
 end
 
 
