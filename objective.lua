@@ -2,13 +2,19 @@ require 'cunn'
 require 'BatchIterator'
 require 'Localizer'
 
-function extract_roi_pooling_input(input_rect, localizer, inputImg, feature_layer_output)
-  local r = localizer:inputToFeatureRect(input_rect, inputImg, feature_layer_output)
+function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
+  local r = localizer:inputToFeatureRect(input_rect)
   -- the use of math.min ensures correct handling of empty rects,
   -- +1 offset for top, left only is conversion from half-open 0-based interval
   local s = feature_layer_output:size()
   r = r:clip(Rect.new(0, 0, s[4], s[3]))
-  local idx = { 1, {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
+  local idx = { }
+  if r:isEmpty() then
+    print("rect is empty for feature map")
+    return nil, idx
+  end
+
+  idx = { 1, {}, { math.min(r.minY + 1, r.maxY), r.maxY }, { math.min(r.minX + 1, r.maxX), r.maxX } }
   return feature_layer_output[idx], idx
 end
 
@@ -23,8 +29,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
   local crossEntropy = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
-  local smoothL1 = nn.SmoothL1Criterion():cuda()
-  --local smoothL1 = nn.MSECriterion():cuda()
+  --local smoothL1 = nn.SmoothL1Criterion():cuda()
+  local smoothL1 = nn.MSECriterion():cuda()
   smoothL1.sizeAverage = false
   local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
   local cnet_input_planes = model.layers[#model.layers].filters
@@ -80,14 +86,12 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local outputs, outputs_c
       -- run forward convolution
       --if mode ~= 'onlyCnet' then
-        outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
-      if mode ~= 'onlyPnet' then
-        outputs_c = pnet_copy:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
-      end
+      outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+
 
       -- ensure all example anchors lie withing existing feature planes
-      cleanAnchors(n, outputs_c or outputs)
-      cleanAnchors(p, outputs_c or outputs)
+      cleanAnchors(n,  outputs)
+      cleanAnchors(p,  outputs)
 
       -- clear delta values for each new image
       for i,out in ipairs(outputs) do
@@ -103,9 +107,11 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local cnetgrad
 
       local target = torch.Tensor({{1,0}})
-      outputs_c = nil
+      --outputs_c = nil
       if pnet_copy then
-        outputs_c = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+        outputs_c = pnet_copy:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+        cleanAnchors(n,  outputs_c)
+        cleanAnchors(p,  outputs_c)
       end
       -- process positive set
       for i,x in ipairs(p) do
@@ -113,7 +119,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local roi = x[2]
         local l = anchor.layer
 
-        local out = outputs[l]
+        local out = outputs_c[l] or outputs[l]
         local delta_out = delta_outputs[l]
 
         local idx = anchor.index
@@ -140,20 +146,20 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- pass through adaptive max pooling operation
         if mode ~= 'onlyPnet' then
-          local pi, idx = extract_roi_pooling_input(roi.rect, localizer, outputs_c[#outputs_c] or outputs[#outputs])
+          local reg_proposal = Anchors.anchorToInput(anchor, reg_out) --reg_target
+          local pi, idx = extract_roi_pooling_input(reg_proposal, localizer,outputs[#outputs])
           local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-          local reg_proposal = Anchors.anchorToInput(anchor, reg_target) --reg_out
           table.insert(roi_pool_state, { input = pi, input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
         end
       end
 
       target = torch.Tensor({{0,1}})
- 
+
       -- process negative
       for i,x in ipairs(n) do
         local anchor = x[1]
         local l = anchor.layer
-        local out = outputs[l]
+        local out = outputs_c[l] or outputs[l]
         local delta_out = delta_outputs[l]
         local idx = anchor.index
         local v = out[idx]
@@ -171,7 +177,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         if mode ~= 'onlyPnet' then
           local outpnet = v[{{1, 2}}]:reshape(1,2)
           if outpnet[1][1] > outpnet[1][2] then
-            local pi, idx = extract_roi_pooling_input(anchor, localizer_c or localizer, outputs_c[#outputs_c] or outputs[#outputs])
+            local pi, idx = extract_roi_pooling_input(anchor, localizer,  outputs[#outputs])
             local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
             table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
           end
@@ -196,6 +202,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
               assert(x.roi.class_index ~= bgclass, "error in organizing the class labels!! bgclass has the same label")
               -- positive example
               cctarget[i] = x.roi.class_index
+              --crtarget[i] = Anchors.inputToAnchor(x.anchor, x.roi.rect)   -- base fine tuning on proposal
               crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect)   -- base fine tuning on proposal
             else
               -- negative example
@@ -209,10 +216,11 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           local coutputs = cnet:forward(cinput)
 
           -- compute classification and regression error and run backward pass
-          lambda = 1
+          lambda = 10
           local crout = coutputs[1]
           if #p < #roi_pool_state then
             crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
+            crtarget[{{#p + 1, #roi_pool_state}, {}}]:zero()
           end
           creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
           local crdelta = smoothL1:backward(crout, crtarget) * lambda
@@ -236,9 +244,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       end -- if mode ~= 'onlyPnet'
 
       -- backward pass of proposal network
-      if mode ~= 'onlyCnet' then
-        local gi = pnet:backward(img, delta_outputs)
-      end
+      --if mode ~= 'onlyCnet' then
+      local gi = pnet:backward(img, delta_outputs)
+      --end
 
       -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
       reg_count = reg_count + #p
