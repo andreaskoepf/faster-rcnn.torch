@@ -3,7 +3,9 @@ require 'BatchIterator'
 require 'Localizer'
 
 function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
+  print(input_rect)
   local r = localizer:inputToFeatureRect(input_rect)
+  print(r)
   -- the use of math.min ensures correct handling of empty rects,
   -- +1 offset for top, left only is conversion from half-open 0-based interval
   local s = feature_layer_output:size()
@@ -29,8 +31,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
   local crossEntropy = nn.CrossEntropyCriterion():cuda()
   local cnll = nn.ClassNLLCriterion():cuda()
-  --local smoothL1 = nn.SmoothL1Criterion():cuda()
-  local smoothL1 = nn.MSECriterion():cuda()
+  local smoothL1 = nn.SmoothL1Criterion():cuda()
+  --local smoothL1 = nn.MSECriterion():cuda()
   smoothL1.sizeAverage = false
   local kh, kw = cfg.roi_pooling.kh, cfg.roi_pooling.kw
   local cnet_input_planes = model.layers[#model.layers].filters
@@ -180,8 +182,10 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           local outpnet = v[{{1, 2}}]:reshape(1,2)
           if outpnet[1][1] > outpnet[1][2] then
             local pi, idx = extract_roi_pooling_input(anchor, localizer,  outputs[#outputs])
-            local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-            table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
+            if pi then
+              local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
+              table.insert(roi_pool_state, { input = pi, input_idx = idx, output = po:clone(), indices = amp.indices:clone() })
+            end
           end
         end
       end
@@ -218,7 +222,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           local coutputs = cnet:forward(cinput)
 
           -- compute classification and regression error and run backward pass
-          lambda = 10
+          lambda = 1
           local crout = coutputs[1]
           if #p < #roi_pool_state then
             crout[{{#p + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
@@ -258,8 +262,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
     end -- for i,x in ipairs(batch) do
 
     -- scale gradient
-    if cls_count ~= 0 then
-      gradient:div(cls_count) -- will divide all elements of gradient with cls_count in-place
+    if creg_count ~= 0 then
+      gradient:div(creg_count) -- will divide all elements of gradient with cls_count in-place
     end
 
     local pcls = cls_loss    -- proposal classification (bg/fg)

@@ -51,11 +51,11 @@ function Rect:size()
 end
 
 function Rect:width()
-  return self.maxX-self.minX
+  return math.max(0,self.maxX-self.minX)
 end
 
 function Rect:height()
-  return self.maxY-self.minY
+  return math.max(0,self.maxY-self.minY)
 end
 
 function Rect:area()
