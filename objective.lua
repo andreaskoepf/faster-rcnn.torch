@@ -73,7 +73,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
     local ccls_loss, ccls_count = 0, 0
 
     -- enable dropouts
-    pnet_copy:training()
+    if pnet_copy then
+      pnet_copy:training()
+    end
     pnet:training()
     cnet:training()
 
@@ -119,7 +121,12 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local roi = x[2]
         local l = anchor.layer
 
-        local out = outputs_c[l] or outputs[l]
+        local out
+        if outputs_c then
+          out= outputs_c[l]
+        else
+          out= outputs[l]
+        end
         local delta_out = delta_outputs[l]
 
         local idx = anchor.index
@@ -161,7 +168,12 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       for i,x in ipairs(n) do
         local anchor = x[1]
         local l = anchor.layer
-        local out = outputs_c[l] or outputs[l]
+        local out
+        if outputs_c then
+          out= outputs_c[l]
+        else
+          out= outputs[l]
+        end
         local delta_out = delta_outputs[l]
         local idx = anchor.index
         local v = out[idx]
