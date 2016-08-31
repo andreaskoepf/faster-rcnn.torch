@@ -3,16 +3,14 @@ require 'BatchIterator'
 require 'Localizer'
 
 function extract_roi_pooling_input(input_rect, localizer, feature_layer_output)
-  print(input_rect)
   local r = localizer:inputToFeatureRect(input_rect)
-  print(r)
   -- the use of math.min ensures correct handling of empty rects,
   -- +1 offset for top, left only is conversion from half-open 0-based interval
   local s = feature_layer_output:size()
   r = r:clip(Rect.new(0, 0, s[4], s[3]))
   local idx = { }
   if r:isEmpty() then
-    print("rect is empty for feature map")
+    --print("rect is empty for feature map")
     return nil, idx
   end
 
