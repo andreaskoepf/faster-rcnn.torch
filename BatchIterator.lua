@@ -1,4 +1,4 @@
-require 'image'
+local image = require 'image'
 require 'utilities'
 require 'Anchors'
 
@@ -197,8 +197,8 @@ function BatchIterator:processImage(img, rois)
   return img, rois
 end
 
-function BatchIterator:nextTraining(count)
-
+function BatchIterator:nextTraining(prefix,count)
+  local prefix = prefix or ""
   if self.oneBatchTraining == 'true' then
     self.training.i = 1 -- Training with only the first batch of images!!!
                         -- This is for testing e.g. the detection net classification,
@@ -246,7 +246,7 @@ function BatchIterator:nextTraining(count)
     local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(1, #positive)) --20160306 16
     local count = #positive + #negative
 
-  --[[  if cfg.nearby_aversion then
+    if cfg.nearby_aversion then
       local nearby_negative = {}
       -- add all nearby negative anchors
       for i,p in ipairs(positive) do
@@ -265,7 +265,7 @@ function BatchIterator:nextTraining(count)
         table.insert(negative, nearby_negative[i])
         count = count + 1
       end
-    end]]
+    end
 
     -- debug boxes
     if false then
@@ -282,7 +282,7 @@ function BatchIterator:nextTraining(count)
       local green = torch.Tensor({0,1,0})
       local white = torch.Tensor({1,1,1})
 
-      image.saveJPG(string.format('debug/trainingImg_%d.jpg', self.training.i), dimg)
+      --image.saveJPG(string.format('debug/trainingImg_%d.jpg', self.training.i), dimg)
       --for i=1,#negative do
       --  draw_rectangle(dimg, negative[i][1], red)
       --end
@@ -293,11 +293,11 @@ function BatchIterator:nextTraining(count)
         draw_rectangle(dimg, rois[i].rect, white, "")
       end
       --image.saveJPG(string.format('anchors%d.jpg', self.training.i), dimg)
-      image.saveJPG(string.format('debug/groundTruthBoxes_%d.jpg', self.training.i), dimg)
+      --image.saveJPG(string.format('debug/groundTruthBoxes_%d.jpg', self.training.i), dimg)
       for i=1,#positive do
         draw_rectangle(dimg, positive[i][1], green ,"")
       end
-      image.saveJPG(string.format('debug/groundTruthBoxes_with_positive_anchors_%d.jpg', self.training.i), dimg)
+      image.saveJPG(string.format('debug/%s/groundTruthBoxes_with_positive_anchors_%d.jpg', prefix, self.training.i), dimg)
 
     end
 
