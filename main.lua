@@ -1,19 +1,21 @@
-require 'torch'
-require 'pl'
-require 'lfs'
+local torch = require 'torch'
+local cutorch = require 'cutorch'
+local pl = require 'pl'
+local lfs = require 'lfs'
 local optim = require 'optim'
 local image = require 'image'
-require 'nngraph'
-require 'cunn'
-require 'nms'
-require 'gnuplot'
+local nngraph = require 'nngraph'
+local cunn = require 'cunn'
+local c = require 'trepl.colorize'
+local gnuplot = require 'gnuplot'
 
+require 'nms'
 require 'utilities'
 require 'Anchors'
 require 'BatchIterator'
 require 'objective'
 require 'Detector'
-local c = require 'trepl.colorize'
+
 
 -- command line options
 cmd = torch.CmdLine()
@@ -61,33 +63,34 @@ local confusion_ccls = optim.ConfusionMatrix(cfg.class_count+1)-- background and
 torch.setdefaulttensortype('torch.FloatTensor')
 cutorch.setDevice(opt.gpuid + 1)  -- nvidia tools start counting at 0
 torch.setnumthreads(opt.threads)
+
 if opt.seed ~= 0 then
   torch.manualSeed(opt.seed)
   cutorch.manualSeed(opt.seed)
 end
 
+
 local function averagePrecision(tp,fp,npos)
-
   -- compute precision/recall
-  fp=torch.cumsum(fp)
-  tp=torch.cumsum(tp)
+  fp = torch.cumsum(fp)
+  tp = torch.cumsum(tp)
 
-  local rec=tp/npos
-  local prec=torch.cdiv(tp, (fp+tp+1e-16))
+  local rec = tp/npos
+  local prec = torch.cdiv(tp, (fp+tp+1e-16))
 
   -- compute average precision
-  local ap= torch.zeros(1)
-  for t=0,1,0.1 do
+  local ap = torch.zeros(1)
+  for t = 0,1,0.1 do
     local tmp = prec[rec:ge(t)]
-    local p= 0
+    local p = 0
     if tmp:nDimension() > 0 then
-      p= torch.max(tmp)
+      p = torch.max(tmp)
     end
 
     if p < 1 then
-      p=0
+      p = 0
     end
-    ap=ap+p/11
+    ap = ap + p/11
   end
   return rec,prec,ap
 end
@@ -95,23 +98,23 @@ end
 
 local function xVOCap(rec,prec)
   -- From the PASCAL VOC 2011 devkit
-  local mrec=torch.cat(torch.zeros(1), rec):cat(torch.ones(1))
-  local mpre=torch.cat(torch.zeros(1), prec):cat(torch.zeros(1))
+  local mrec = torch.cat(torch.zeros(1), rec):cat(torch.ones(1))
+  local mpre = torch.cat(torch.zeros(1), prec):cat(torch.zeros(1))
 
-  for i=mpre:size(1)-1,1,-1 do
-    mpre[i]=math.max(mpre[i],mpre[i+1])
+  for i = mpre:size(1)-1,1,-1 do
+    mpre[i] = math.max(mpre[i],mpre[i+1])
   end
 
   local indexA = torch.ByteTensor(mrec:size()):zero()
   local indexB = torch.ByteTensor(mrec:size()):zero()
   for ii = 2,mrec:size(1) do
-    if mrec[ii-1]~=mrec[ii] then
+    if mrec[ii-1] ~= mrec[ii] then
       indexA[ii] = 1
       indexB[ii-1] = 1
     end
   end
 
-  local ap=torch.sum((mrec[indexA]-mrec[indexB]):cmul(mpre[indexB]))
+  local ap = torch.sum((mrec[indexA]-mrec[indexB]):cmul(mpre[indexB]))
 
   return ap
 end
@@ -121,13 +124,16 @@ local function evaluateTpFp(matches,gt)
   local iou,tp,fp,npos = 0, 0, 0, 0
   npos = #gt.rois
   --iterate over all matches and determain ioU
+
   for i,m in ipairs(matches) do
     local roi_m
+
     if m.p > 0.9 then
       roi_m = m.r
     else
       goto continue
     end
+
     for igt,vgt in ipairs(gt) do
       iou = Rect.IoU(vgt.rect,roi_m)
 
@@ -135,11 +141,13 @@ local function evaluateTpFp(matches,gt)
         --discriminate between tp and fp
         if vgt.class_index == m.class then --compare class label
           tp = tp + 1
-      else
-        fp = fp + 1
-      end
+        else
+          fp = fp + 1
+        end
+
       end
     end
+
     ::continue::
   end
   return tp, fp, npos
@@ -184,10 +192,12 @@ local function createModel(cfg,model_path, cuda)
   -- get configuration & model
   local model_factory = dofile(model_path)
   local model = model_factory(cfg)
+
   if cuda then
     model.cnet:cuda()
     model.pnet:cuda()
   end
+
   return model
 end
 
@@ -199,14 +209,17 @@ function load_pnet_model(cfg, model_path, network_filename, cuda)
   -- combine parameters from pnet and cnet into flat tensors
   weights[1], gradient = combine_and_flatten_parameters(model.pnet)
   local training_stats
+
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
     --training_stats = stored.stats
     weights[1]:copy(stored.weights)
     print(string.format("loaded pnet from: %s",network_filename))
   end
+
   return model, weights[1], gradient, training_stats
 end
+
 
 function load_cnet_model(cfg, model_path, network_filename, cuda)
   local model = createModel(cfg,model_path, cuda)
@@ -215,12 +228,14 @@ function load_cnet_model(cfg, model_path, network_filename, cuda)
   -- combine parameters from pnet and cnet into flat tensors
   weights, gradient = combine_and_flatten_parameters(model.pnet,model.cnet)
   local training_stats
+
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
     --training_stats = stored.stats
     weights:copy(stored.weights)
     print(string.format("loaded cnet from: %s",network_filename))
   end
+
   return model, weights, gradient, training_stats
 end
 
@@ -271,6 +286,7 @@ local function get_optimizer()
         { 24001,   35000,   1e-5,      0 },
         { 35001,     1e8,   1e-5,      0 }
       }
+
   elseif opt.opti == 'rmsprop' then
     optimState = {
       learningRate = opt.lr,
@@ -305,6 +321,7 @@ local function get_optimizer()
   else
     error('unknown optimization method')
   end
+
   return optimMethod,optimState,learnSchedule
 end
 
@@ -327,13 +344,13 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   if opt.mode == 'onlyCnet' then
     training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
     pnet_copy = model.pnet:clone()
+
     if not (c_network_filename == '') then
       model, weights, gradient, training_stats = load_cnet_model(cfg, model_path, c_network_filename, cuda)
-    else
-      print(c_network_filename)
-      os.exit()
     end
+
   end
+
   if not training_stats then
     training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
   end
@@ -349,7 +366,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   local optimMethod,optimState,learnSchedule = get_optimizer()
 
   for i=1,opt.iterations do
-    collectgarbage()
     if (i % 500) == 0 then
     --opt.lr = opt.lr - opt.lr/2
     --optimState.learningRate = opt.lr
@@ -366,7 +382,6 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
 
     local timer = torch.Timer()
     local _, loss = optimMethod(eval_objective_grad, weights, optimState)
-
     local time = timer:time().real
 
     print('---------------------------------------------------------------------------------')
@@ -376,6 +391,7 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     if i%opt.plot == 0 then
       confusion_pcls:updateValids()
       confusion_ccls:updateValids()
+
       local train_acc_pnet = confusion_pcls.totalValid * 100
       local train_acc_cnet = confusion_ccls.totalValid * 100
       print(string.format('[Main:graph_training] Train accuracy: pnet'..c.cyan'%.2f cnet:'..c.cyan'%.2f ',train_acc_pnet,train_acc_cnet))
@@ -476,6 +492,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
           draw_rectangle(img, m.r2 or m.r, green, string.format("%d", m.class or 0))
         end
       end
+
       for ii = 1,#b.rois do
         draw_rectangle(img, b.rois[ii].rect, white, string.format("%d", b.rois[ii].class_index))
       end
@@ -483,7 +500,9 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
 
     end -- for i,b in ipairs(batch) do
+
   else
+
     for i=1,20 do
       --print(string.format('[Main:evaluation] iteration: %d',i))
       -- pick random validation image
@@ -507,12 +526,15 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
 
       -- draw bounding boxes and save image
       for i,m in ipairs(matches) do
+
         if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
           draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
         else
           draw_rectangle(img, m.r2 or m.r, green, string.format("CI: %d",m.class or 0))
         end
+
       end
+
       for ii = 1,#b.rois do
         draw_rectangle(img, b.rois[ii].rect, white, string.format("CI: %d",b.rois[ii].class_index))
       end
@@ -520,7 +542,9 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
     end -- for i=1,20 do
   end -- if oneBatchTraining == 'true' then ... else
+
   collectgarbage()
+
   if opt.mode ~= 'onlyPnet' then
     local rec, prec, ap = averagePrecision(tp,fp,npos)
     ap = xVOCap(rec,prec)
@@ -537,6 +561,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
     if f_p then base64im_p = f_p:read'*all' end
     if f_d then base64im_d = f_d:read'*all' end
   end
+
   local file = io.open(string.format('%s/report.html',save),'w')
   if file == nil then
     print(string.format('Unable to read %s/report.html!!!',save))
