@@ -28,10 +28,12 @@ cmd:option('-cfg', 'config/imagenet.lua', 'configuration file')
 cmd:option('-model', 'models/vgg_small.lua', 'model factory file')
 cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix')
 cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
-cmd:option('-restore', '', 'network snapshot file name to load')
+cmd:option('-restorePnet', '', 'network snapshot file name to load')
+cmd:option('-restoreCnet', '', 'network snapshot file name to load')
 cmd:option('-mode', 'both', 'one of three training modes: onlyPnet, onlyCnet, or both')
 cmd:option('-snapshot', 1000, 'snapshot interval')
 cmd:option('-plot', 100, 'plot training progress interval')
+cmd:option('-iterations', 50000, 'Number of training iterations')
 cmd:option('-lr', 1E-3, 'learn rate')
 cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
 cmd:option('-opti', 'adam', 'Optimizer')
@@ -157,7 +159,7 @@ function plot_training_progress(prefix, stats)
     { 'pcls', xs, torch.Tensor(stats.pcls), '-' }
   )
 
-  gnuplot.axis({ 0, #stats.pcls, 0, 10 })
+  gnuplot.axis({ 0, #stats.pcls, 0, 2 })
   gnuplot.xlabel('iteration')
   gnuplot.ylabel('loss')
 
@@ -170,7 +172,7 @@ function plot_training_progress(prefix, stats)
     { 'dcls', xs, torch.Tensor(stats.dcls), '-' }
   )
 
-  gnuplot.axis({ 0, #stats.pcls, 0, 10 })
+  gnuplot.axis({ 0, #stats.pcls, 0, 2 })
   gnuplot.xlabel('iteration')
   gnuplot.ylabel('loss')
 
@@ -178,48 +180,20 @@ function plot_training_progress(prefix, stats)
 end
 
 
-function load_model1(cfg, model_path, network_filename, cuda)
-
+local function createModel(cfg,model_path, cuda)
   -- get configuration & model
   local model_factory = dofile(model_path)
   local model = model_factory(cfg)
-  graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
-  graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
-  graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
-  graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
-
   if cuda then
     model.cnet:cuda()
     model.pnet:cuda()
   end
-
-  -- combine parameters from pnet and cnet into flat tensors
-  local weights, gradient = combine_and_flatten_parameters(model.pnet)
-  local training_stats
-  if network_filename and #network_filename > 0 then
-    local stored = load_obj(network_filename)
-    training_stats = stored.stats
-    weights:copy(stored.weights)
-  end
-
-  return model, weights, gradient, training_stats
+  return model
 end
 
 
-function load_model2(cfg, model_path, network_filename, cuda)
-
-  -- get configuration & model
-  local model_factory = dofile(model_path)
-  local model = model_factory(cfg)
-  graph.dot(model.pnet.fg, 'pnet',string.format('%s/pnet_fg',opt.resultDir))
-  graph.dot(model.pnet.bg, 'pnet',string.format('%s/pnet_bg',opt.resultDir))
-  graph.dot(model.cnet.fg, 'cnet', string.format('%s/cnet_fg',opt.resultDir))
-  graph.dot(model.cnet.bg, 'cnet', string.format('%s/cnet_bg',opt.resultDir))
-
-  if cuda then
-    model.cnet:cuda()
-    model.pnet:cuda()
-  end
+function load_pnet_model(cfg, model_path, network_filename, cuda)
+  local model = createModel(cfg,model_path, cuda)
   local weights = {}
   local gradient
   -- combine parameters from pnet and cnet into flat tensors
@@ -229,17 +203,25 @@ function load_model2(cfg, model_path, network_filename, cuda)
     local stored = load_obj(network_filename)
     --training_stats = stored.stats
     weights[1]:copy(stored.weights)
+    print(string.format("loaded pnet from: %s",network_filename))
   end
-  if opt.mode == 'onlyCnet' then
-    weights[2], gradient = combine_and_flatten_parameters(model.cnet)
-    return model, weights[2], gradient, training_stats
-  elseif opt.mode == 'onlyPnet' then
-    weights[2], gradient = combine_and_flatten_parameters(model.pnet,model.cnet)
-    return model, weights[2], gradient, training_stats
-  elseif opt.mode == 'both' then
-    return model, weights[1], gradient, training_stats
-  end
+  return model, weights[1], gradient, training_stats
+end
 
+function load_cnet_model(cfg, model_path, network_filename, cuda)
+  local model = createModel(cfg,model_path, cuda)
+  local weights = {}
+  local gradient
+  -- combine parameters from pnet and cnet into flat tensors
+  weights, gradient = combine_and_flatten_parameters(model.pnet,model.cnet)
+  local training_stats
+  if network_filename and #network_filename > 0 then
+    local stored = load_obj(network_filename)
+    --training_stats = stored.stats
+    weights:copy(stored.weights)
+    print(string.format("loaded cnet from: %s",network_filename))
+  end
+  return model, weights, gradient, training_stats
 end
 
 
@@ -327,7 +309,8 @@ local function get_optimizer()
 end
 
 
-function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, network_filename)
+function graph_training(cfg, model_path, snapshot_prefix, training_data_filename, p_network_filename,c_network_filename)
+  local cuda = true
   local training_data = load_obj(training_data_filename)
   local file_names = keys(training_data.ground_truth)
   print(string.format("Training data loaded. Dataset: '%s'; Total files: %d; classes: %d; Background: %d)",
@@ -335,17 +318,24 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
     #file_names,
     #training_data.class_names,
     #training_data.background_files))
+  local model, weights, gradient, training_stats
+  local pnet_copy = nil
 
   -- create/load model
-  local model, weights, gradient, training_stats = load_model2(cfg, model_path, network_filename, true)
-  if not training_stats then
-    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-  end
+  model, weights, gradient, training_stats = load_pnet_model(cfg, model_path, p_network_filename, cuda)
 
-  local pnet_copy = nil
   if opt.mode == 'onlyCnet' then
     training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
-    pnet_copy = model.pnet
+    pnet_copy = model.pnet:clone()
+    if not (c_network_filename == '') then
+      model, weights, gradient, training_stats = load_cnet_model(cfg, model_path, c_network_filename, cuda)
+    else
+      print(c_network_filename)
+      os.exit()
+    end
+  end
+  if not training_stats then
+    training_stats = { pcls={}, preg={}, dcls={}, dreg={} }
   end
 
   for i=1,#model.pnet.outnode.children do
@@ -358,11 +348,11 @@ function graph_training(cfg, model_path, snapshot_prefix, training_data_filename
   print '==> configuring optimizer'
   local optimMethod,optimState,learnSchedule = get_optimizer()
 
-  for i=1,50000 do
-
+  for i=1,opt.iterations do
+    collectgarbage()
     if (i % 500) == 0 then
-      --opt.lr = opt.lr - opt.lr/2
-      --optimState.learningRate = opt.lr
+    --opt.lr = opt.lr - opt.lr/2
+    --optimState.learningRate = opt.lr
     end
 
     if opt.opti == 'sgd' then
@@ -456,7 +446,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
   local save = opt.resultDir
 
   if oneBatchTraining == 'true' then
-    local batch = batch_iterator:nextTraining()
+    local batch = batch_iterator:nextTraining("detector")
     for i,b in ipairs(batch) do
       local img = b.img:cuda()
       local matches = d:detect(img)
@@ -464,8 +454,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       local v
 
       if opt.mode ~= 'onlyPnet' then
-        --tp[i],fp[i],v = evaluateTpFp(matches,b)
-        --npos = npos + v
+      --tp[i],fp[i],v = evaluateTpFp(matches,b)
+      --npos = npos + v
       end
 
       if color_space == 'yuv' then
@@ -483,7 +473,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
           draw_rectangle(img, m.r, red, string.format("%d", m.class or 0))
         else
           --draw_rectangle_old(img, m.r, green)
-          draw_rectangle(img, m.r2, green, string.format("%d", m.class or 0))
+          draw_rectangle(img, m.r2 or m.r, green, string.format("%d", m.class or 0))
         end
       end
       for ii = 1,#b.rois do
@@ -491,6 +481,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       end
 
       image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+
     end -- for i,b in ipairs(batch) do
   else
     for i=1,20 do
@@ -502,8 +493,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       local v
 
       if opt.mode ~= 'onlyPnet' then
-        --tp[i],fp[i],v = evaluateTpFp(matches,b)
-        --npos = npos + v
+      --tp[i],fp[i],v = evaluateTpFp(matches,b)
+      --npos = npos + v
       end
 
       if color_space == 'yuv' then
@@ -519,7 +510,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
         if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
           draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
         else
-          draw_rectangle(img, m.r2, green, string.format("CI: %d",m.class or 0))
+          draw_rectangle(img, m.r2 or m.r, green, string.format("CI: %d",m.class or 0))
         end
       end
       for ii = 1,#b.rois do
@@ -529,7 +520,7 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
     end -- for i=1,20 do
   end -- if oneBatchTraining == 'true' then ... else
-
+  collectgarbage()
   if opt.mode ~= 'onlyPnet' then
     local rec, prec, ap = averagePrecision(tp,fp,npos)
     ap = xVOCap(rec,prec)
@@ -592,4 +583,4 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
 end
 
 
-graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+graph_training(cfg, opt.model, opt.name, opt.train, opt.restorePnet, opt.restoreCnet)
