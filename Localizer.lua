@@ -42,20 +42,20 @@ end
 
 local function convLayer_inpRec2featRec(rec, kW, kH, dW, dH, padW, padH)
     local rec_ =rec:clone()
-    rec_.minX = (rec_.minX + padW) / dW
-    rec_.minY = (rec_.minY + padH) / dH
-    rec_.maxX = (rec_.maxX  + dW - kW + padW) / dW
-    rec_.maxY = (rec_.maxY  + dH - kH + padH) / dH
+    rec_.minX = (rec_.minX - kW/2 + dW/2 + padW) / dW
+    rec_.minY = (rec_.minY - kH/2 + dH/2 + padH) / dH
+    rec_.maxX = (rec_.maxX - kW/2 + dW/2 + padW) / dW
+    rec_.maxY = (rec_.maxY - kH/2 + dH/2 + padH) / dH
     return rec_
 end
 
 
 local function convLayer_featRec2inpRec(rec, kW, kH, dW, dH, padW, padH)
     local rec_ =rec:clone()
-    rec_.minX = rec_.minX * dW - padW-- 1*1-1 = 0 --> 0*1-1 = -1 --> -1*1-1 = -2 --> ... --> -74
-    rec_.minY = rec_.minY * dH - padH
-    rec_.maxX = rec_.maxX * dW - padW + kW - dW
-    rec_.maxY = rec_.maxY * dH - padH + kH - dH
+    rec_.minX = rec_.minX * dW - padW + kW/2 - dW/2-- 1*1-1 = 0 --> 0*1-1 = -1 --> -1*1-1 = -2 --> ... --> -74
+    rec_.minY = rec_.minY * dH - padH + kH/2 - dH/2
+    rec_.maxX = rec_.maxX * dW - padW + kW/2 - dW/2
+    rec_.maxY = rec_.maxY * dH - padH + kH/2 - dH/2
     return rec_:clone()
 end
 
