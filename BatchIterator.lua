@@ -1,6 +1,7 @@
 local image = require 'image'
 require 'utilities'
 require 'Anchors'
+local cudnn = require 'cudnn'
 
 local BatchIterator = torch.class('BatchIterator')
 
@@ -161,7 +162,7 @@ function BatchIterator:processImage(img, rois)
       )
       img, rois = crop(img, rois, crop_rect)
     end
-  end
+ end
 
   -- horizontal flip operation
   if aug.hflip and aug.hflip > 0 then
@@ -246,6 +247,7 @@ function BatchIterator:nextTraining(prefix,count)
     local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(1, #positive)) --20160306 16
     local count = #positive + #negative
 
+--[[
     if cfg.nearby_aversion then
       local nearby_negative = {}
       -- add all nearby negative anchors
@@ -266,6 +268,7 @@ function BatchIterator:nextTraining(prefix,count)
         count = count + 1
       end
     end
+--]]
 
     -- debug boxes
     if false then
