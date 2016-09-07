@@ -199,7 +199,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
       outputs = nil
       outputs_c = nil
-      collectgarbage("collect")
+
       -- fine-tuning STAGE
       -- pass extracted roi-data through classification network
       if mode ~= 'onlyPnet' then
@@ -210,7 +210,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
           local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
           local cctarget = torch.CudaTensor(#roi_pool_state):zero()
-          local cctarget_test = torch.DoubleTensor(#roi_pool_state,21):zero()
+          local cctarget_test = torch.DoubleTensor(#roi_pool_state, cfg.class_count + 1):zero()
           local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
 
           for i,x in ipairs(roi_pool_state) do
@@ -264,15 +264,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           end
         end -- if #roi_pool_state > 0
       end -- if mode ~= 'onlyPnet'
-      --local c = #roi_pool_state
-      --for ii=0, c do roi_pool_state[ii]=nil end
 
-      collectgarbage("collect") --;local m1=collectgarbage("count"); print(string.format("Memory B: %f",m1))
-      -- backward pass of proposal network
-      --if mode ~= 'onlyCnet' then
       local gi = pnet:backward(input, delta_outputs)
 
-      --end
       -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
       reg_count = reg_count + #p
       cls_count = cls_count + #p + #n
