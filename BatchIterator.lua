@@ -231,7 +231,7 @@ function BatchIterator:nextTraining(prefix,count)
       return 0
     end
 
-    local img, rois = self:processImage(img, rois)
+    img, rois = self:processImage(img, rois)
     img_size = img:size()        -- get final size
     if img_size[2] < 128 or img_size[3] < 128 then
       -- notify user about skipped image
@@ -365,7 +365,7 @@ function BatchIterator:nextValidation(count)
     end
 
     local rois = deep_copy(self.ground_truth[fn].rois)   -- copy RoIs ground-truth data (will be manipulated, e.g. scaled)
-    local img, rois = self:processImage(img, rois)
+    img, rois = self:processImage(img, rois)
     img_size = img:size()        -- get final size
     if img_size[2] < 128 or img_size[3] < 128 then
       print(string.format("Warning: Skipping image '%s'. Invalid size after process: (%dx%d)", fn, img_size[3], img_size[2]))

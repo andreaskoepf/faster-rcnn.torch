@@ -69,29 +69,29 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
     -- enable dropouts
     if pnet_copy then
-      pnet_copy:training()
+      pnet_copy:evaluate()
     end
     pnet:training()
     cnet:training()
 
     local batch = batch_iterator:nextTraining()
-
     for i,x in ipairs(batch) do
 
       --print(string.format("Batch size: %d",#x.positive + #x.negative))
-      local img = x.img:cuda()    -- convert batch to cuda if we are running on the gpu
+      local img = x.img    -- convert batch to cuda if we are running on the gpu
+      local input = img:view(1, img:size(1), img:size(2), img:size(3)):cuda()
       local p = x.positive        -- get positive and negative anchors examples
       local n = x.negative
       local roi_pool_state = {}
       local counter = 0
       local outputs, outputs_c
       -- run forward convolution
-      outputs = pnet:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+      outputs = pnet:forward(input)
 
       -- clear delta values for each new image
       for i,out in ipairs(outputs) do
         if not delta_outputs[i] then
-          delta_outputs[i] = torch.FloatTensor():cuda()
+          delta_outputs[i] = torch.CudaTensor()
         end
         delta_outputs[i]:resizeAs(out)
         delta_outputs[i]:zero()
@@ -104,11 +104,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local target = torch.Tensor({{1,0}})
       --outputs_c = nil
       if pnet_copy then
-        outputs_c = pnet_copy:forward(img:view(1, img:size(1), img:size(2), img:size(3)))
+        outputs_c = pnet_copy:forward(input)
       end
-      x.img= nil
-      img = nil
-      collectgarbage()
+
       -- process positive set
       for i,x in ipairs(p) do
         local anchor = x[1]
@@ -138,9 +136,9 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
         -- box regression
         local reg_out = v[{{3, 6}}] -- Anchor
-        local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
+        local reg_target = Anchors.inputToAnchor(anchor, roi.rect)  -- regression target
         if mode ~= 'onlyCnet' then
-          reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda
+          reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target:cuda()) * lambda
           local dr = smoothL1:backward(reg_out, reg_target) * lambda
           d[{{3,6}}]:add(dr)
         end
@@ -153,7 +151,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           local pi, idx = extract_roi_pooling_input(reg_proposal, localizer,outputs[#outputs])
           if pi then
             local po = amp:forward(pi):view(kh * kw * cnet_input_planes)
-            table.insert(roi_pool_state, { input = pi:clone(), input_idx = idx, anchor = anchor:clone(), reg_proposal = reg_proposal:clone(), roi = roi, output = po:clone(), indices = amp.indices:clone() })
+            table.insert(roi_pool_state, { input = pi:clone(), input_idx = idx, anchor = anchor, reg_proposal = reg_proposal, roi = roi, output = po:clone(), indices = amp.indices:clone() })
           else
 
             counter = counter +1
@@ -161,7 +159,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         end
       end
 
-      target = torch.Tensor({{0,1}})
+      target = torch.DoubleTensor({{0,1}})
 
       -- process negative
       for i,x in ipairs(n) do
@@ -200,30 +198,31 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       end
 
       outputs = nil
-      collectgarbage()
-      --print(string.format("number for roi pool: %d",#roi_pool_state))
+      outputs_c = nil
+
       -- fine-tuning STAGE
       -- pass extracted roi-data through classification network
       if mode ~= 'onlyPnet' then
         --print(string.format("#roi_pool_state = %d",#roi_pool_state))
         -- create cnet input batch
         if #roi_pool_state > 0 then
-
           --if false then
+
           local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
           local cctarget = torch.CudaTensor(#roi_pool_state):zero()
-          local cctarget_test = torch.CudaTensor(#roi_pool_state,class_count+1):zero()
+          local cctarget_test = torch.DoubleTensor(#roi_pool_state, cfg.class_count + 1):zero()
           local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
 
           for i,x in ipairs(roi_pool_state) do
-            cinput[i] = x.output
+            cinput[i]:copy(x.output)
+            x.output = nil
             if x.roi then
               assert(x.roi.class_index ~= bgclass, "error in organizing the class labels!! bgclass has the same label")
               -- positive example
-              cctarget[i] = x.roi.class_index
+              cctarget[i]= x.roi.class_index
               cctarget_test[i][x.roi.class_index] = 1
               --crtarget[i] = Anchors.inputToAnchor(x.anchor, x.roi.rect)   -- base fine tuning on proposal
-              crtarget[i] = Anchors.inputToAnchor(x.reg_proposal, x.roi.rect):cuda()   -- base fine tuning on proposal
+              crtarget[i]:copy(Anchors.inputToAnchor(x.reg_proposal, x.roi.rect))   -- base fine tuning on proposal
             else
               -- negative example
               cctarget[i] = bgclass
@@ -234,7 +233,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           end
 
           -- process classification batch
-          local coutputs = cnet:forward(cinput)
+          local coutputs = cnet:forward(cinput:cuda())
 
           -- compute classification and regression error and run backward pass
           lambda = 10
@@ -260,14 +259,14 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
           for i,x in ipairs(roi_pool_state) do
             amp.indices = x.indices
             delta_outputs[#delta_outputs][x.input_idx]:add(amp:backward(x.input, post_roi_delta[i]:view(cnet_input_planes, kh, kw)))
+            --clear table:
+
           end
         end -- if #roi_pool_state > 0
       end -- if mode ~= 'onlyPnet'
 
-      -- backward pass of proposal network
-      --if mode ~= 'onlyCnet' then
-      local gi = pnet:backward(img, delta_outputs)
-      --end
+      local gi = pnet:backward(input, delta_outputs)
+
       -- print(string.format('%f; pos: %d; neg: %d', gradient:max(), #p, #n))
       reg_count = reg_count + #p
       cls_count = cls_count + #p + #n
@@ -275,8 +274,6 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       ccls_count = ccls_count + 1
       --print(counter)
     end -- for i,x in ipairs(batch) do
-    batch = nil
-    collectgarbage()
     -- scale gradient
     if creg_count ~= 0 then
       gradient:div(creg_count) -- will divide all elements of gradient with cls_count in-place
