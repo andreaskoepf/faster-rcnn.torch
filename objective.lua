@@ -79,14 +79,14 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
 
       --print(string.format("Batch size: %d",#x.positive + #x.negative))
       local img = x.img    -- convert batch to cuda if we are running on the gpu
-      local input = img:view(1, img:size(1), img:size(2), img:size(3))
+      local input = img:view(1, img:size(1), img:size(2), img:size(3)):cuda()
       local p = x.positive        -- get positive and negative anchors examples
       local n = x.negative
       local roi_pool_state = {}
       local counter = 0
       local outputs, outputs_c
       -- run forward convolution
-      outputs = pnet:forward(input:cuda())
+      outputs = pnet:forward(input)
 
       -- clear delta values for each new image
       for i,out in ipairs(outputs) do
@@ -104,7 +104,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
       local target = torch.Tensor({{1,0}})
       --outputs_c = nil
       if pnet_copy then
-        outputs_c = pnet_copy:forward(input:cuda())
+        outputs_c = pnet_copy:forward(input)
       end
 
       -- process positive set
@@ -159,7 +159,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         end
       end
 
-      target = torch.Tensor({{0,1}})
+      target = torch.DoubleTensor({{0,1}})
 
       -- process negative
       for i,x in ipairs(n) do
@@ -207,10 +207,10 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         -- create cnet input batch
         if #roi_pool_state > 0 then
           --if false then
-          local cinput = torch.DoubleTensor(#roi_pool_state, kh * kw * cnet_input_planes)
-          local cctarget = torch.DoubleTensor(#roi_pool_state):zero()
+          local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
+          local cctarget = torch.CudaTensor(#roi_pool_state):zero()
           local cctarget_test = torch.DoubleTensor(#roi_pool_state,21):zero()
-          local crtarget = torch.DoubleTensor(#roi_pool_state, 4):zero()
+          local crtarget = torch.CudaTensor(#roi_pool_state, 4):zero()
 
           for i,x in ipairs(roi_pool_state) do
             cinput[i]:copy(x.output)
@@ -242,15 +242,15 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
             crout[{{#p-counter + 1, #roi_pool_state}, {}}]:zero() -- ignore negative examples
             crtarget[{{#p-counter + 1, #roi_pool_state}, {}}]:zero()
           end
-          creg_loss = creg_loss + smoothL1:forward(crout, crtarget:cuda())* lambda -- * 10
-          local crdelta = smoothL1:backward(crout, crtarget:cuda()) * lambda
+          creg_loss = creg_loss + smoothL1:forward(crout, crtarget)* lambda -- * 10
+          local crdelta = smoothL1:backward(crout, crtarget) * lambda
 
           local ccout = coutputs[2]
 
           --criterion CrossEntropy
-          local loss = crossEntropy:forward(ccout, cctarget:cuda())
+          local loss = crossEntropy:forward(ccout, cctarget)
           ccls_loss = ccls_loss + loss
-          local ccdelta = crossEntropy:backward(ccout, cctarget:cuda())
+          local ccdelta = crossEntropy:backward(ccout, cctarget)
 
           local post_roi_delta = cnet:backward(cinput, { crdelta, ccdelta })
           cnet_confusion:batchAdd(ccout, cctarget_test)
