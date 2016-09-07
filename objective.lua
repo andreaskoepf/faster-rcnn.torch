@@ -207,6 +207,7 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         -- create cnet input batch
         if #roi_pool_state > 0 then
           --if false then
+
           local cinput = torch.CudaTensor(#roi_pool_state, kh * kw * cnet_input_planes)
           local cctarget = torch.CudaTensor(#roi_pool_state):zero()
           local cctarget_test = torch.DoubleTensor(#roi_pool_state,21):zero()
