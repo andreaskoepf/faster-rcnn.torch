@@ -138,8 +138,8 @@ function create_objective(model, weights, gradient, batch_iterator, stats, pnet_
         local reg_out = v[{{3, 6}}] -- Anchor
         local reg_target = Anchors.inputToAnchor(anchor, roi.rect):cuda()  -- regression target
         if mode ~= 'onlyCnet' then
-          reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target) * lambda
-          local dr = smoothL1:backward(reg_out, reg_target) * lambda
+          reg_loss = reg_loss + smoothL1:forward(reg_out, reg_target:cuda()) * lambda
+          local dr = smoothL1:backward(reg_out, reg_target:cuda()) * lambda
           d[{{3,6}}]:add(dr)
         end
 
