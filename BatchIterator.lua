@@ -241,7 +241,7 @@ function BatchIterator:nextTraining(prefix,count)
 
     -- find positive examples
     local img_rect = Rect.new(0, 0, img_size[3], img_size[2])
-    local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, true) -- cfg.best_match)
+    local positive = self.anchors:findPositive(rois, img_rect, cfg.positive_threshold, cfg.negative_threshold, cfg.best_match)
 
     -- random negative examples
     local negative = self.anchors:sampleNegative(img_rect, rois, cfg.negative_threshold, math.max(1, #positive)) --20160306 16
