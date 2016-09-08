@@ -146,11 +146,11 @@ local function evaluateTpFp(matches,gt)
         --discriminate between tp and fp
         if vgt.class_index == m.class then --compare class label
           tp = tp + 1
-        else
-          fp = fp + 1
-        end
+      else
+        fp = fp + 1
       end
-      
+      end
+
     end
     ::continue::
   end
@@ -213,7 +213,7 @@ function load_pnet_model(cfg, model_path, network_filename, cuda)
   local weights = {}
   local gradient
   -- combine parameters from pnet and cnet into flat tensors
-  weights, gradient = combine_and_flatten_parameters(model.pnet)
+  weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
   local training_stats
 
   if network_filename and #network_filename > 0 then
@@ -509,9 +509,9 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
     tp = tp[{{1,#batch}}]:clone()
     fp = fp[{{1,#batch}}]:clone()
   else
-    tp = torch.zeros(2000)
-    fp = torch.zeros(2000)
-    for i=1,2000 do
+    tp = torch.zeros(20)
+    fp = torch.zeros(20)
+    for i=1,20 do
       --print(string.format('[Main:evaluation] iteration: %d',i))
       -- pick random validation image
       local b = batch_iterator:nextValidation(1)[1]
@@ -523,31 +523,32 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
         tp[i],fp[i],v = evaluateTpFp(matches,b.rois)
         npos = npos + v
       end
-
-      if color_space == 'yuv' then
-        img = image.yuv2rgb(img)
-      elseif color_space == 'lab' then
-        img = image.lab2rgb(img)
-      elseif color_space == 'hsv' then
-        img = image.hsv2rgb(img)
-      end
-
-      -- draw bounding boxes and save image
-      for i,m in ipairs(matches) do
-
-        if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
-          draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
-        else
-          draw_rectangle(img, m.r2 or m.r, green, string.format("CI: %d",m.class or 0))
+      if i < 21 then
+        if color_space == 'yuv' then
+          img = image.yuv2rgb(img)
+        elseif color_space == 'lab' then
+          img = image.lab2rgb(img)
+        elseif color_space == 'hsv' then
+          img = image.hsv2rgb(img)
         end
 
-      end
+        -- draw bounding boxes and save image
+        for i,m in ipairs(matches) do
 
-      for ii = 1,#b.rois do
-        draw_rectangle(img, b.rois[ii].rect, white, string.format("CI: %d",b.rois[ii].class_index))
-      end
+          if m.class == (cfg.backgroundClass or (cfg.class_count+1)) then
+            draw_rectangle(img, m.r, red, string.format("CI: %d",m.class or 0))
+          else
+            draw_rectangle(img, m.r2 or m.r, green, string.format("CI: %d",m.class or 0))
+          end
 
-      image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+        end
+
+        for ii = 1,#b.rois do
+          draw_rectangle(img, b.rois[ii].rect, white, string.format("CI: %d",b.rois[ii].class_index))
+        end
+
+        image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
+      end
     end -- for i=1,20 do
   end -- if oneBatchTraining == 'true' then ... else
 
