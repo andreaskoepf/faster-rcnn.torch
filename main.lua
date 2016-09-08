@@ -122,21 +122,26 @@ end
 
 local function evaluateTpFp(matches,gt)
   local iou,tp,fp,npos = 0, 0, 0, 0
-  npos = #gt.rois
+  npos = #gt
   --iterate over all matches and determain ioU
 
   for i,m in ipairs(matches) do
     local roi_m
 
-    if m.p > 0.9 then
-      roi_m = m.r
+    if m.confidence > 0.0 then
+      roi_m = m.r2
     else
       goto continue
     end
 
-    for igt,vgt in ipairs(gt) do
+    for igt,vgt_ in ipairs(gt) do
+      local vgt
+      if #vgt_>1 then
+        vgt = vgt_[2]
+      else
+        vgt = vgt_
+      end
       iou = Rect.IoU(vgt.rect,roi_m)
-
       if iou > 0.5 then --check overlay
         --discriminate between tp and fp
         if vgt.class_index == m.class then --compare class label
@@ -144,12 +149,13 @@ local function evaluateTpFp(matches,gt)
         else
           fp = fp + 1
         end
-
       end
+      
     end
-
     ::continue::
   end
+
+  --print(string.format("tp = %d, fp = %d, npos = %d, numMatches = %d",tp,fp,npos,#matches))
   return tp, fp, npos
 end
 
@@ -207,17 +213,17 @@ function load_pnet_model(cfg, model_path, network_filename, cuda)
   local weights = {}
   local gradient
   -- combine parameters from pnet and cnet into flat tensors
-  weights[1], gradient = combine_and_flatten_parameters(model.pnet)
+  weights, gradient = combine_and_flatten_parameters(model.pnet)
   local training_stats
 
   if network_filename and #network_filename > 0 then
     local stored = load_obj(network_filename)
     --training_stats = stored.stats
-    weights[1]:copy(stored.weights)
+    weights:copy(stored.weights)
     print(string.format("loaded pnet from: %s",network_filename))
   end
-
-  return model, weights[1], gradient, training_stats
+  weights, gradient = combine_and_flatten_parameters(model.pnet, model.cnet)
+  return model, weights, gradient, training_stats
 end
 
 
@@ -470,8 +476,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       local v
 
       if opt.mode ~= 'onlyPnet' then
-      --tp[i],fp[i],v = evaluateTpFp(matches,b)
-      --npos = npos + v
+        tp[i],fp[i],v = evaluateTpFp(matches,b.positive)
+        npos = npos + v
       end
 
       if color_space == 'yuv' then
@@ -500,10 +506,12 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       image.saveJPG(string.format('%s/output%d.jpg',save, i), img)
 
     end -- for i,b in ipairs(batch) do
-
+    tp = tp[{{1,#batch}}]:clone()
+    fp = fp[{{1,#batch}}]:clone()
   else
-
-    for i=1,20 do
+    tp = torch.zeros(2000)
+    fp = torch.zeros(2000)
+    for i=1,2000 do
       --print(string.format('[Main:evaluation] iteration: %d',i))
       -- pick random validation image
       local b = batch_iterator:nextValidation(1)[1]
@@ -512,8 +520,8 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
       local v
 
       if opt.mode ~= 'onlyPnet' then
-      --tp[i],fp[i],v = evaluateTpFp(matches,b)
-      --npos = npos + v
+        tp[i],fp[i],v = evaluateTpFp(matches,b.rois)
+        npos = npos + v
       end
 
       if color_space == 'yuv' then
@@ -544,11 +552,12 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
   end -- if oneBatchTraining == 'true' then ... else
 
   collectgarbage()
-
+  local mAP = 0
   if opt.mode ~= 'onlyPnet' then
     local rec, prec, ap = averagePrecision(tp,fp,npos)
     ap = xVOCap(rec,prec)
-    print(string.format("mAP : %04f",ap*100))
+    mAP = ap *100
+    print(string.format("mAP : %04f; npos = %d; ap= %04f",mAP,npos,ap))
   end
 
   local base64im_p
@@ -596,6 +605,9 @@ function evaluation(model, pnet_copy, training_data, optimState, batch_iterator,
     file:write'<pre>\n'
     file:write'Training ccls\n'
     file:write(tostring(confusion_ccls)..'\n')
+    if opt.mode ~= 'onlyPnet' then
+      file:write(string.format("==> mean AP : %04f;",mAP))
+    end
     file:write'</pre>\n'
     file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_fg','cnet_fg','cnet_fg'))
     file:write(string.format('<td>%s<img src="%s.svg" alt="%s" width="300" height="600" ></td>\n','cnet_bg','cnet_bg','cnet_bg'))
