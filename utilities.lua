@@ -176,7 +176,7 @@ function draw_rectangle(img, rect, color, label)
     end
   end
 
-  if h > 0 and w > 0 and x0>10 and y0 < y1-10 then
+  if h > 0 and w > 0 and x0 < x1-15 and y0 < y1-15 then
     --print(string.format("drawText '%s' at x0 = %f, y0 = %f,info: x1 = %f, y1 = %f, image width = %f, height = %f ",label,x0,y0,x1,y1,sz[3],sz[2]))
     img:copy(image.drawText(img:double(),label,x0,y0,{color = {color[1]*255,color[2]*255,color[3]*255}, size =1}))
     img:cuda()
