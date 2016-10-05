@@ -55,7 +55,7 @@ TODO
 ## Start Training:
 
 ### Proposal network (Pnet)
-Start with an pretrained vgg16 network. (Get network from: XXX)
+Start with a pretrained vgg16 network. (Get network from: https://github.com/szagoruyko/fastrcnn-models.torch)
 
 1. Using only the first Batch for training
 '''
@@ -85,7 +85,7 @@ th main.lua -cfg config/pascal_voc.lua -model models/pretrained/vgg16_ori.lua -n
 - add final per class non-maximum suppression to generate final proposals (already included but eval code rewrite still pending)
 
 ### Training
-- add joint Training to merge Pnet and Cnet to one network
+- add joint training to merge Pnet and Cnet to one network
 
 ### Docu
 extend readme file
