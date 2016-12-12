@@ -13,34 +13,9 @@ require 'BatchIterator'
 require 'objective'
 require 'Detector'
 
+local opts = require 'opts'
 
--- command line options
-cmd = torch.CmdLine()
-cmd:addTime()
-
-cmd:text()
-cmd:text('Training a convnet for region proposals')
-cmd:text()
-
-cmd:text('=== Training ===')
-cmd:option('-cfg', 'config/imagenet.lua', 'configuration file')
-cmd:option('-model', 'models/vgg_small.lua', 'model factory file')
-cmd:option('-name', 'imgnet', 'experiment name, snapshot prefix') 
-cmd:option('-train', 'ILSVRC2015_DET.t7', 'training data file name')
-cmd:option('-restore', '', 'network snapshot file name to load')
-cmd:option('-snapshot', 1000, 'snapshot interval')
-cmd:option('-plot', 100, 'plot training progress interval')
-cmd:option('-lr', 1E-4, 'learn rate')
-cmd:option('-rms_decay', 0.9, 'RMSprop moving average dissolving factor')
-cmd:option('-opti', 'rmsprop', 'Optimizer')
-
-cmd:text('=== Misc ===')
-cmd:option('-threads', 8, 'number of threads')
-cmd:option('-gpuid', 0, 'device ID (CUDA), (use -1 for CPU)')
-cmd:option('-seed', 0, 'random seed (0 = no fixed seed)')
-
-print('Command line args:')
-local opt = cmd:parse(arg or {})
+local opt = opts.parse(arg)
 print(opt)
 
 print('Options:')
@@ -215,6 +190,9 @@ function evaluation_demo(cfg, model_path, training_data_filename, network_filena
   
 end
 
-graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
---evaluation_demo(cfg, opt.model, opt.train, opt.restore)
+if opt.mode == 'train' then 
+  graph_training(cfg, opt.model, opt.name, opt.train, opt.restore)
+else
+  evaluation_demo(cfg, opt.model, opt.train, opt.restore)
+end
 
